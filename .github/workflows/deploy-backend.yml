@@ -41,25 +41,28 @@ jobs:
 
       - name: Install dependencies and restart backend
         run: |
-          ssh -o StrictHostKeyChecking=no root@178.128.205.239 << 'EOF'
+          ssh -o StrictHostKeyChecking=no root@178.128.205.239 << 'ENDSSH'
             cd /root/score-leaderboard-Admin-app/Backend
             
             # Create .env file
-            cat > .env << EOL
-            DATABASE_URL="${{ secrets.DATABASE_URL }}"
-            CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
-            PORT=9000
-            NODE_ENV=production
-            CORS_ORIGIN=https://score-leaderboard-admin-app.vercel.app
-            EOL
+            cat > .env << 'ENVEOF'
+DATABASE_URL="${{ secrets.DATABASE_URL }}"
+CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
+PORT=9000
+NODE_ENV=production
+CORS_ORIGIN=https://score-leaderboard-admin-app.vercel.app
+ENVEOF
             
-            # Install Python dependencies (handle externally-managed-environment)
+            # Install Python dependencies
             python3 -m venv venv || true
-            source venv/bin/activate
-            pip install sqlalchemy python-dotenv mysql-connector-python
+            source venv/bin/activate || true
+            pip install sqlalchemy python-dotenv mysql-connector-python || pip3 install sqlalchemy python-dotenv mysql-connector-python --break-system-packages
             
+            # Install Node.js dependencies and build
             npm ci --production
             npm run build
+            
+            # Restart PM2 service
             pm2 restart score-leaderboard-backend || pm2 start dist/index.js --name score-leaderboard-backend
             pm2 save
-          EOF
+          ENDSSH
