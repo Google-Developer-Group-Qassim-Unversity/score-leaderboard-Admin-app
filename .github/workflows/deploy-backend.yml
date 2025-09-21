@@ -45,12 +45,14 @@ jobs:
           cat > deploy_script.sh << 'SCRIPT'
             cd /root/score-leaderboard-Admin-app/Backend
             
-            # Create .env file
-            echo 'DATABASE_URL="${{ secrets.DATABASE_URL }}"' > .env
-            echo 'CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}' >> .env
-            echo 'PORT=9000' >> .env
-            echo 'NODE_ENV=production' >> .env
-            echo 'CORS_ORIGIN=https://score-leaderboard-admin-app.vercel.app' >> .env
+            # Create .env file with proper escaping
+            cat > .env << 'ENVFILE'
+DATABASE_URL="${{ secrets.DATABASE_URL }}"
+CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
+PORT=9000
+NODE_ENV=production
+CORS_ORIGIN=https://score-leaderboard-admin-app.vercel.app
+ENVFILE
             
             # Install Python dependencies
             python3 -m venv venv || true
