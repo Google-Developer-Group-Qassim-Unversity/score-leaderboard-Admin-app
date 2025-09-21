@@ -40,21 +40,17 @@ jobs:
           rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" Backend/ root@178.128.205.239:/root/score-leaderboard-Admin-app/Backend/
 
       - name: Install dependencies and restart backend
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
         run: |
-          ssh -o StrictHostKeyChecking=no root@178.128.205.239 << 'ENDSSH'
+          # Create temporary script with environment variables
+          cat > deploy_script.sh << 'SCRIPT'
             cd /root/score-leaderboard-Admin-app/Backend
             
             # Create .env file
-            cat > .env << 'ENVEOF'
-DATABASE_URL="$DATABASE_URL"
-CLERK_SECRET_KEY=$CLERK_SECRET_KEY
-PORT=9000
-NODE_ENV=production
-CORS_ORIGIN=https://score-leaderboard-admin-app.vercel.app
-ENVEOF
+            echo 'DATABASE_URL="${{ secrets.DATABASE_URL }}"' > .env
+            echo 'CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}' >> .env
+            echo 'PORT=9000' >> .env
+            echo 'NODE_ENV=production' >> .env
+            echo 'CORS_ORIGIN=https://score-leaderboard-admin-app.vercel.app' >> .env
             
             # Install Python dependencies
             python3 -m venv venv || true
@@ -68,4 +64,9 @@ ENVEOF
             # Restart PM2 service
             pm2 restart score-leaderboard-backend || pm2 start dist/index.js --name score-leaderboard-backend
             pm2 save
-          ENDSSH
+          SCRIPT
+          
+          # Copy and execute the script on VPS
+          scp -o StrictHostKeyChecking=no deploy_script.sh root@178.128.205.239:/tmp/
+          ssh -o StrictHostKeyChecking=no root@178.128.205.239 "chmod +x /tmp/deploy_script.sh && /tmp/deploy_script.sh && rm /tmp/deploy_script.sh"
+          rm deploy_script.sh
