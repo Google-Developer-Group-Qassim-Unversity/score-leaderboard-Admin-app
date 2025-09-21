@@ -50,7 +50,7 @@ jobs:
             DATABASE_URL=${{ secrets.DATABASE_URL }}
             PORT=9000
             NODE_ENV=production
-            CORS_ORIGIN=https://your-vercel-app.vercel.app
+            CORS_ORIGIN=https://score-leaderboard-admin-app.vercel.app
             EOL
             
             npm ci --production
