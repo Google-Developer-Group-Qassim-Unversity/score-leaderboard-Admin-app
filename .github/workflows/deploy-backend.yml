@@ -46,12 +46,15 @@ jobs:
             
             # Create .env file
             cat > .env << EOL
+            DATABASE_URL="${{ secrets.DATABASE_URL }}"
             CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
-            DATABASE_URL=${{ secrets.DATABASE_URL }}
             PORT=9000
             NODE_ENV=production
             CORS_ORIGIN=https://score-leaderboard-admin-app.vercel.app
             EOL
+            
+            # Install Python dependencies
+            pip3 install sqlalchemy python-dotenv mysql-connector-python
             
             npm ci --production
             npm run build
