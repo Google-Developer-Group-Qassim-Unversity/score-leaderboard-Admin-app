@@ -3,6 +3,7 @@ name: Deploy Backend to VPS
 on:
   push:
     branches: [main]
+    paths: ['Backend/**']
 
 jobs:
   deploy:
@@ -10,7 +11,24 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: Backend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd Backend
+          npm ci
+
+      - name: Build TypeScript
+        run: |
+          cd Backend
+          npm run build
 
       - name: Set up SSH
         uses: webfactory/ssh-agent@v0.9.0
@@ -19,13 +37,24 @@ jobs:
 
       - name: Copy backend files to VPS
         run: |
-          rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" Backend/ root@178.128.205.239:/root/score-leaderboard-backend/
+          rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" Backend/ root@178.128.205.239:/root/score-leaderboard-Admin-app/Backend/
 
       - name: Install dependencies and restart backend
         run: |
           ssh -o StrictHostKeyChecking=no root@178.128.205.239 << 'EOF'
-            cd /root/score-leaderboard-backend
-            npm install
+            cd /root/score-leaderboard-Admin-app/Backend
+            
+            # Create .env file
+            cat > .env << EOL
+            CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            PORT=9000
+            NODE_ENV=production
+            CORS_ORIGIN=https://your-vercel-app.vercel.app
+            EOL
+            
+            npm ci --production
             npm run build
-            pm2 restart all || pm2 start dist/index.js --name score-leaderboard-backend
+            pm2 restart score-leaderboard-backend || pm2 start dist/index.js --name score-leaderboard-backend
+            pm2 save
           EOF
