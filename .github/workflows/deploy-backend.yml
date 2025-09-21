@@ -53,8 +53,10 @@ jobs:
             CORS_ORIGIN=https://score-leaderboard-admin-app.vercel.app
             EOL
             
-            # Install Python dependencies
-            pip3 install sqlalchemy python-dotenv mysql-connector-python
+            # Install Python dependencies (handle externally-managed-environment)
+            python3 -m venv venv || true
+            source venv/bin/activate
+            pip install sqlalchemy python-dotenv mysql-connector-python
             
             npm ci --production
             npm run build
