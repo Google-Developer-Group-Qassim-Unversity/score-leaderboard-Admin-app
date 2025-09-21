@@ -40,14 +40,17 @@ jobs:
           rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" Backend/ root@178.128.205.239:/root/score-leaderboard-Admin-app/Backend/
 
       - name: Install dependencies and restart backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
         run: |
           ssh -o StrictHostKeyChecking=no root@178.128.205.239 << 'ENDSSH'
             cd /root/score-leaderboard-Admin-app/Backend
             
             # Create .env file
             cat > .env << 'ENVEOF'
-DATABASE_URL="${{ secrets.DATABASE_URL }}"
-CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
+DATABASE_URL="$DATABASE_URL"
+CLERK_SECRET_KEY=$CLERK_SECRET_KEY
 PORT=9000
 NODE_ENV=production
 CORS_ORIGIN=https://score-leaderboard-admin-app.vercel.app
