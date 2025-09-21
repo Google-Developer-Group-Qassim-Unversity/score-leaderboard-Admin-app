@@ -61,7 +61,7 @@ jobs:
             # Install Python dependencies
             python3 -m venv venv || true
             source venv/bin/activate || true
-            pip install sqlalchemy python-dotenv mysql-connector-python fastapi uvicorn || pip3 install sqlalchemy python-dotenv mysql-connector-python fastapi uvicorn --break-system-packages
+            pip install sqlalchemy python-dotenv mysql-connector-python fastapi uvicorn pandas email-validator || pip3 install sqlalchemy python-dotenv mysql-connector-python fastapi uvicorn pandas email-validator --break-system-packages
             
             # Install Node.js dependencies and build
             npm ci --production
