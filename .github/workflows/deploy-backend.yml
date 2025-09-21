@@ -61,13 +61,14 @@ jobs:
             # Install Python dependencies
             python3 -m venv venv || true
             source venv/bin/activate || true
-            pip install sqlalchemy python-dotenv mysql-connector-python || pip3 install sqlalchemy python-dotenv mysql-connector-python --break-system-packages
+            pip install sqlalchemy python-dotenv mysql-connector-python fastapi uvicorn || pip3 install sqlalchemy python-dotenv mysql-connector-python fastapi uvicorn --break-system-packages
             
             # Install Node.js dependencies and build
             npm ci --production
             npm run build
             
-            # Restart PM2 service
+            # Restart PM2 services - both Node.js and Python
             pm2 restart score-leaderboard-backend || pm2 start dist/index.js --name score-leaderboard-backend
+            pm2 restart score-leaderboard-api || (cd ETL && pm2 start "python3 -m uvicorn main:app --host 0.0.0.0 --port 7001" --name score-leaderboard-api)
             pm2 save
           ENDSSH
