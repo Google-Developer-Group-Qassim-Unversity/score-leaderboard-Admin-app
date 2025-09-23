@@ -13,23 +13,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: Backend/package-lock.json
-
-      - name: Install dependencies
-        run: |
-          cd Backend
-          npm ci
-
-      - name: Build TypeScript
-        run: |
-          cd Backend
-          npm run build
-
       - name: Set up SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
@@ -37,7 +20,7 @@ jobs:
 
       - name: Copy backend files to VPS
         run: |
-          rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" Backend/ root@178.128.205.239:/root/score-leaderboard-Admin-app/Backend/
+          rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" Backend/ETL root@178.128.205.239:/root/score-leaderboard-Admin-app/Backend/
 
       - name: Install dependencies and restart backend
         run: |
@@ -45,30 +28,26 @@ jobs:
           cat > env_content << EOF
           DATABASE_URL=${{ secrets.DATABASE_URL }}
           CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
-          PORT=9000
+          PORT=7001
           NODE_ENV=production
           CORS_ORIGIN=https://score-leaderboard-admin-app.vercel.app
           EOF
           
           # Copy environment file to VPS
-          scp -o StrictHostKeyChecking=no env_content root@178.128.205.239:/root/score-leaderboard-Admin-app/Backend/.env
+          scp -o StrictHostKeyChecking=no env_content root@178.128.205.239:/root/score-leaderboard-Admin-app/Backend/ETL/.env
           rm env_content
           
           # Run deployment commands on VPS
           ssh -o StrictHostKeyChecking=no root@178.128.205.239 << 'ENDSSH'
-            cd /root/score-leaderboard-Admin-app/Backend
+            cd /root/score-leaderboard-Admin-app/Backend/ETL
             
             # Install Python dependencies
             python3 -m venv venv || true
             source venv/bin/activate || true
             pip install sqlalchemy python-dotenv mysql-connector-python fastapi uvicorn pandas email-validator openpyxl || pip3 install sqlalchemy python-dotenv mysql-connector-python fastapi uvicorn pandas email-validator --break-system-packages
             
-            # Install Node.js dependencies and build
-            npm ci --production
-            npm run build
             
             # Restart PM2 services - both Node.js and Python
-            pm2 restart score-leaderboard-backend || pm2 start dist/index.js --name score-leaderboard-backend
-            pm2 restart score-leaderboard-api || (cd ETL && pm2 start "python3 -m uvicorn main:app --host 0.0.0.0 --port 7001" --name score-leaderboard-api)
+            pm2 restart score-leaderboard-backend || (cd ETL && pm2 start "python3 -m uvicorn main:app --host 0.0.0.0 --port 7001" --name score-leaderboard-api)
             pm2 save
           ENDSSH
