@@ -3,9 +3,6 @@ name: Deploy Backend to VPS
 on:
   push:
     branches: [main]
-    paths: 
-      - 'Backend/**'
-      - 'Backend/ETL/**'
 
 jobs:
   deploy:
@@ -22,7 +19,7 @@ jobs:
 
       - name: Copy backend files to VPS
         run: |
-          rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" Backend/ETL root@178.128.205.239:/root/score-leaderboard-Admin-app/Backend/
+          rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" Backend/ETL/ root@178.128.205.239:/root/score-leaderboard-Admin-app/Backend/
 
       - name: Install dependencies and restart backend
         run: |
@@ -50,6 +47,7 @@ jobs:
             
             
             # Restart PM2 services - both Node.js and Python
-            pm2 restart score-leaderboard-backend || (cd ETL && pm2 start "python3 -m uvicorn main:app --host 0.0.0.0 --port 7001" --name score-leaderboard-api)
+            echo pwd
+            pm2 restart score-leaderboard-backend || (pm2 start "python3 -m uvicorn main:app --host 0.0.0.0 --port 7001" --name score-leaderboard-api)
             pm2 save
           ENDSSH
