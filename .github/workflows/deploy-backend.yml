@@ -3,7 +3,9 @@ name: Deploy Backend to VPS
 on:
   push:
     branches: [main]
-    paths: ['Backend/**']
+    paths: 
+      - 'Backend/**'
+      - 'Backend/ETL/**'
 
 jobs:
   deploy:
