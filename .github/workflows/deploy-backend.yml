@@ -45,8 +45,7 @@ jobs:
             apt install -y pkg-config default-libmysqlclient-dev build-essential
             python3 -m venv venv || true
             source venv/bin/activate || true
-            pip install sqlalchemy python-dotenv python-multipart mysql-connector-python mysqlclient fastapi uvicorn pandas email-validator openpyxl || pip3 install sqlalchemy mysqlclient python-dotenv mysql-connector-python fastapi uvicorn pandas email-validator --break-system-packages
-            
+            pip install -r requirements.txt
             
             # Restart PM2 services - Python
             pm2 restart score-leaderboard-Admin-backend && pm2 start "python3 -m uvicorn main:app --host 0.0.0.0 --port 7001" --name score-leaderboard-Admin-backend
