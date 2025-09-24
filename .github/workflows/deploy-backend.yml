@@ -43,10 +43,10 @@ jobs:
             # Install Python dependencies
             python3 -m venv venv || true
             source venv/bin/activate || true
-            pip install sqlalchemy python-dotenv mysql-connector-python fastapi uvicorn pandas email-validator openpyxl || pip3 install sqlalchemy python-dotenv mysql-connector-python fastapi uvicorn pandas email-validator --break-system-packages
+            pip install sqlalchemy python-dotenv mysql-connector-python mysqlclient fastapi uvicorn pandas email-validator openpyxl || pip3 install sqlalchemy mysqlclient python-dotenv mysql-connector-python fastapi uvicorn pandas email-validator --break-system-packages
             
             
-            # Restart PM2 services - both Node.js and Python
+            # Restart PM2 services - Python
             echo pwd
             pm2 restart score-leaderboard-backend || (pm2 start "python3 -m uvicorn main:app --host 0.0.0.0 --port 7001" --name score-leaderboard-api)
             pm2 save
