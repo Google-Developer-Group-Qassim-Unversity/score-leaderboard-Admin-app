@@ -41,6 +41,7 @@ jobs:
             cd /root/score-leaderboard-Admin-app/Backend/ETL
             
             # Install Python dependencies
+            apt install -y pkg-config default-libmysqlclient-dev build-essential
             python3 -m venv venv || true
             source venv/bin/activate || true
             pip install sqlalchemy python-dotenv mysql-connector-python mysqlclient fastapi uvicorn pandas email-validator openpyxl || pip3 install sqlalchemy mysqlclient python-dotenv mysql-connector-python fastapi uvicorn pandas email-validator --break-system-packages
