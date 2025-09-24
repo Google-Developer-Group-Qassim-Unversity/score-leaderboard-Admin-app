@@ -46,7 +46,7 @@ jobs:
             python3 -m venv venv || true
             source venv/bin/activate || true
             pip install -r requirements.txt
-            
+
             # Restart PM2 services - Python
-            pm2 restart score-leaderboard-Admin-backend && pm2 start "python3 -m uvicorn main:app --host 0.0.0.0 --port 7001" --name score-leaderboard-Admin-backend
+            pm2 start "python3 -m uvicorn main:app --host 0.0.0.0 --port 7001" --name score-leaderboard-Admin-backend --update-env
           ENDSSH
