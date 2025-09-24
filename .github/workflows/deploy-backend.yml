@@ -27,7 +27,8 @@ jobs:
           cat > env_content << EOF
           DATABASE_URL=${{ secrets.DATABASE_URL }}
           CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
-          PORT=7001
+          NEXT_PUBLIC_HOST=${{ secrets.NEXT_PUBLIC_HOST }}
+          PORT=701
           NODE_ENV=production
           CORS_ORIGIN=https://score-leaderboard-admin-app.vercel.app
           EOF
@@ -48,7 +49,5 @@ jobs:
             
             
             # Restart PM2 services - Python
-            echo pwd
-            pm2 start "python3 -m uvicorn main:app --host 0.0.0.0 --port 7001" --name score-leaderboard-Admin-backend
-            pm2 save
+            pm2 restart score-leaderboard-Admin-backend && pm2 start "python3 -m uvicorn main:app --host 0.0.0.0 --port 7001" --name score-leaderboard-Admin-backend
           ENDSSH
