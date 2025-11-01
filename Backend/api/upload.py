@@ -11,12 +11,15 @@ router = APIRouter()
 UPLOAD_DIR = "./uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# TODO: add time validation for start_date and end_date
 def parse_upload_members_form(
     start_date: datetime = Form(...),
     end_date: datetime = Form(...),
     file: UploadFile = File(...),
 ) -> tuple[datetime, datetime, UploadFile]:
+    """
+    Parse form data for /upload/members endpoint.
+    Validates that file, start_date, and end_date are provided.
+    """
     return start_date, end_date, file
 
 async def _uploaded_file(file: UploadFile) -> tuple[str, str]:
@@ -34,12 +37,12 @@ async def _uploaded_file(file: UploadFile) -> tuple[str, str]:
 	
 	return file_name, file_location
 
-@router.post("/", status_code=201)
+@router.post("/upload", status_code=201, tags=["upload"])
 async def upload_file(file: UploadFile = File(...)):
 	file_name, _ = await _uploaded_file(file)
 	return {"file": file_name}
 
-@router.post("/members", status_code=201)
+@router.post("/upload/members", status_code=201, tags=["upload"])
 async def upload_members(parsed: tuple = Depends(parse_upload_members_form)):
 	start_date, end_date, file = parsed
 	
