@@ -49,12 +49,13 @@ jobs:
           echo "📦 setting up virtual environment and installing dependencies..."
           uv venv --clear -p python3.13 .venv
           source .venv/bin/activate
-          uv pip install -r requirements.txt
+          uv pip install -q -r requirements.txt
           
           echo "🥷 setting up environment variables..."
           if [ -z ${{ secrets.DATABASE_URL  }} ]; then
               echo "❗ DATABASE_URL is not set in secrets. Exiting..."
               exit 1
+          fi
           echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
           
           echo "Build Complete ✅."
