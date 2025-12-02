@@ -24,7 +24,7 @@ jobs:
           TARGET_DIR=~/$NAME
           BRANCH=refactor
           REPO_URL="https://github.com/Google-Developer-Group-Qassim-Unversity/score-leaderboard-Admin-app.git"
-          PORT=7001
+          PORT=7501
           
           echo "Cloning new repository..."
           rm -rf "$TARGET_DIR"
