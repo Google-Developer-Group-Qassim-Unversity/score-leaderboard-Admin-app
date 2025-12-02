@@ -70,7 +70,7 @@ jobs:
 
           echo "💾 creating proccess $NAME..."
           pm2 delete $NAME || true
-          pm2 start "uv run uvicorn app.main:app --port $PORT" --host 0.0.0.0 --name $NAME --time
+          pm2 start "uv run uvicorn app.main:app --port $PORT --host 0.0.0.0" --name $NAME --time
           pm2 save
           echo "Application is running on port $PORT ✅."
           echo "==============================="
