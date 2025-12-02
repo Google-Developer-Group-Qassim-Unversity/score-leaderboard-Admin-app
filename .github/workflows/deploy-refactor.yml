@@ -67,8 +67,13 @@ jobs:
               echo "install it with:  npm install pm2 -g"
               exit 1
           fi
-          pm2 restart $NAME || echo "💾 proccess $NAME not found creating new process..." \
-          && pm2 start "uv run uvicorn app.main:app --port $PORT" --name $NAME --time
+
+          if pm2 restart $NAME; then
+              echo "💾 process $NAME restarted successfully."
+          else
+              echo "💾 process $NAME not found creating new process..."
+              pm2 start "uv run uvicorn app.main:app --port $PORT" --name $NAME --time
+          fi
           pm2 save
           echo "Application is running on port $PORT ✅."
           echo "==============================="
