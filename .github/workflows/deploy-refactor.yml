@@ -68,11 +68,9 @@ jobs:
               exit 1
           fi
 
-          if pm2 restart $NAME; then
-              echo "💾 process $NAME restarted successfully."
-          else
-              echo "💾 process $NAME not found creating new process..."
-              pm2 start "uv run uvicorn app.main:app --port $PORT" --name $NAME --time
+          echo "💾 creating proccess $NAME..."
+          pm2 delete $NAME || true
+          pm2 start "uv run uvicorn app.main:app --port $PORT" --name $NAME --time
           fi
           pm2 save
           echo "Application is running on port $PORT ✅."
