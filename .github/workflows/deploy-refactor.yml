@@ -1,0 +1,80 @@
+name: Deploy Refactor Backend
+
+on:
+  push:
+    branches: [ refactor ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Deploy using ssh
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: 22
+        script: |
+          echo "Running Deployment commands...🚀"
+          set -e # important to stop the script if any command fails
+          NAME="score-admin-refactor"
+          TARGET_DIR=~/$NAME
+          BRANCH=refactor
+          REPO_URL="https://github.com/Google-Developer-Group-Qassim-Unversity/score-leaderboard-Admin-app.git"
+          PORT=7001
+          
+          if [ -d "$TARGET_DIR/.git" ]; then
+              echo "Updating existing repository..."
+              cd "$TARGET_DIR"
+              git fetch origin
+              git switch $BRANCH
+              git reset --hard origin/$BRANCH # a better 'git pull' as it can lead to errors like conflicts or local changes not being committed
+          else
+              echo "Cloning new repository..."
+              rm -rf "$TARGET_DIR"
+              git clone --branch $BRANCH "$REPO_URL" "$TARGET_DIR"
+          fi
+          rm -rf $TARGET_DIR/Frontend
+          mv $TARGET_DIR/Backend/* $TARGET_DIR
+          echo "Deployment Complete ✅."
+          echo "==============================="
+          
+          echo "Running Build commands...🚀"
+          cd "$TARGET_DIR"
+          
+          
+          if ! command -v uv >/dev/null 2>&1; then
+              echo "☀️ Installing uv..."
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              source ~/.bashrc
+          else
+              echo "☀️ Found uv at $(command -v uv)"
+          fi
+          
+          echo "📦 setting up virtual environment and installing dependencies..."
+          uv venv --clear -p python3.13 .venv
+          source .venv/bin/activate
+          uv pip install -r requirements.txt
+          
+          echo "🥷 setting up environment variables..."
+          if [ -z ${{ secrets.DATABASE_URL  }} ]; then
+              echo "❗ DATABASE_URL is not set in secrets. Exiting..."
+              exit 1
+          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
+          
+          echo "Build Complete ✅."
+          echo "==============================="
+          
+          echo "🚀 Starting application with pm2..."
+          if ! command -v pm2 >/dev/null 2>&1; then
+              echo "❗ PM2 not Found"
+              echo "install it with:  npm install pm2 -g"
+              exit 1
+          
+          pm2 restart $NAME || echo "💾 proccess $NAME not found creating new process..." \
+          && pm2 start "uv run uvicorn app.main:app --port $PORT" --name $NAME --time
+          pm2 save
+          echo "Application is running on port $PORT ✅."
+          echo "==============================="
+          
