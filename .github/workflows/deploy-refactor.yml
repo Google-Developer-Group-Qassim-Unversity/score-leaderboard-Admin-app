@@ -24,25 +24,17 @@ jobs:
           REPO_URL="https://github.com/Google-Developer-Group-Qassim-Unversity/score-leaderboard-Admin-app.git"
           PORT=7001
           
-          if [ -d "$TARGET_DIR/.git" ]; then
-              echo "Updating existing repository..."
-              cd "$TARGET_DIR"
-              git fetch origin
-              git switch $BRANCH
-              git reset --hard origin/$BRANCH # a better 'git pull' as it can lead to errors like conflicts or local changes not being committed
-          else
-              echo "Cloning new repository..."
-              rm -rf "$TARGET_DIR"
-              git clone --branch $BRANCH "$REPO_URL" "$TARGET_DIR"
-          fi
+          echo "Cloning new repository..."
+          rm -rf "$TARGET_DIR"
+          git clone --branch $BRANCH "$REPO_URL" "$TARGET_DIR"
           rm -rf $TARGET_DIR/Frontend
           mv $TARGET_DIR/Backend/* $TARGET_DIR
+          rm -rf $TARGET_DIR/Backend
           echo "Deployment Complete ✅."
           echo "==============================="
           
           echo "Running Build commands...🚀"
           cd "$TARGET_DIR"
-          
           
           if ! command -v uv >/dev/null 2>&1; then
               echo "☀️ Installing uv..."
@@ -71,10 +63,11 @@ jobs:
               echo "❗ PM2 not Found"
               echo "install it with:  npm install pm2 -g"
               exit 1
-          
+          fi
           pm2 restart $NAME || echo "💾 proccess $NAME not found creating new process..." \
           && pm2 start "uv run uvicorn app.main:app --port $PORT" --name $NAME --time
           pm2 save
           echo "Application is running on port $PORT ✅."
           echo "==============================="
           
+            
