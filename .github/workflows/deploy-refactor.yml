@@ -16,8 +16,10 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: 22
         script: |
+          set -e # stops the script if any command fails
+          export PATH="$HOME/.local/bin:$PATH"
+        
           echo "Running Deployment commands...🚀"
-          set -e # important to stop the script if any command fails
           NAME="score-admin-refactor"
           TARGET_DIR=~/$NAME
           BRANCH=refactor
