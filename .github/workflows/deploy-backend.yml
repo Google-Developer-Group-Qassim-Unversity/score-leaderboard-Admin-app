@@ -2,7 +2,7 @@ name: Deploy Refactor Backend
 
 on:
   push:
-    branches: [ refactor ]
+    branches: [ main ]
 
 jobs:
   deploy:
@@ -20,9 +20,9 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
         
           echo "Running Deployment commands...🚀"
-          NAME="score-admin-refactor"
+          NAME="GDG-backend"
           TARGET_DIR=~/$NAME
-          BRANCH=refactor
+          BRANCH=main
           REPO_URL="https://github.com/Google-Developer-Group-Qassim-Unversity/score-leaderboard-Admin-app.git"
           PORT=7501
           
