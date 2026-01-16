@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Figtree } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
-import "./globals.css";
+import "../globals.css";
 
 import { ThemeProvider } from "@/components/theme-provider";
-import { Navbar } from "@/components/navbar";
 import { Toaster } from "@/components/ui/sonner";
 
 const figtree = Figtree({ subsets: ["latin"], variable: "--font-sans" });
@@ -20,14 +19,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "GDG-Admin",
-  description: "Admin dashboard for Score Tracker application",
-  icons: {
-    icon: "/gdg.ico",
-  },
+  title: "Access Denied - GDG-Admin",
+  description: "Access denied - Admin privileges required",
 };
 
-export default function RootLayout({
+export default function DeniedLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
@@ -47,10 +43,8 @@ export default function RootLayout({
             enableSystem
             disableTransitionOnChange
           >
-            <div className="relative min-h-screen flex flex-col">
-              <Navbar />
-              <main className="flex-1 container mx-auto px-4 sm:px-6 lg:px-8 py-6">{children}</main>
-            </div>
+            {/* No navbar here - just the page content */}
+            {children}
             <Toaster />
           </ThemeProvider>
         </body>
