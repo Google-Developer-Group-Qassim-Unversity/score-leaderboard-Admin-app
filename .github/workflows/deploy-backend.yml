@@ -10,18 +10,19 @@ jobs:
     steps:
     - name: Deploy using ssh
       uses: appleboy/ssh-action@master
-      # 1. Map secrets to environment variables here
+      # 1. Map secrets to environment variables
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        SECRET_TWO: ${{ secrets.SECRET_TWO }}     # Replace with your actual secret name
-        SECRET_THREE: ${{ secrets.SECRET_THREE }} # Replace with your actual secret name
+        GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+        GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        JWT_SECRET: ${{ secrets.JWT_SECRET }}
       with:
         host: ${{ secrets.HOST }}
         username: ${{ secrets.USERNAME }}
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: 22
-        # 2. Tell the action to forward these specific variables to the remote server
-        envs: DATABASE_URL,SECRET_TWO,SECRET_THREE
+        # 2. Forward the variable names to the remote server
+        envs: DATABASE_URL,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,JWT_SECRET
         script: |
           set -e
           export PATH="$HOME/.local/bin:$PATH"
@@ -47,29 +48,28 @@ jobs:
           echo "Running Build commands...🚀"
           cd "$TARGET_DIR"
 
-          # --- SECRET CHECKING LOOP START ---
+          # --- SECRET CHECKING LOOP ---
           echo "🔐 Checking and writing secrets..."
           
-          # List the variable NAMES here (space separated)
-          REQUIRED_VARS="DATABASE_URL SECRET_TWO SECRET_THREE"
+          # List your secret variable names here
+          SECRET_NAMES="DATABASE_URL GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET JWT_SECRET"
           
-          # Clean existing .env to avoid duplicates
-          rm -f .env 
+          # Clean existing .env
+          rm -f .env
 
-          for VAR_NAME in $REQUIRED_VARS; do
-              # Use indirect expansion to get the value from the variable name
-              VALUE="${!VAR_NAME}"
+          for VAR in $SECRET_NAMES; do
+              # Indirect expansion to get value
+              VAL="${!VAR}"
               
-              if [ -z "$VALUE" ]; then
-                  echo "❗ $VAR_NAME is not set (forwarding failed). Exiting..."
+              if [ -z "$VAL" ]; then
+                  echo "❗ $VAR is not set. Exiting..."
                   exit 1
               fi
               
-              # Append to .env
-              echo "$VAR_NAME=$VALUE" >> .env
+              echo "$VAR=$VAL" >> .env
           done
           echo "Secrets written to .env ✅"
-          # --- SECRET CHECKING LOOP END ---
+          # ----------------------------
           
           if ! command -v uv >/dev/null 2>&1; then
               echo "☀️ Installing uv..."
