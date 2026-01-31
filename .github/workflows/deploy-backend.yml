@@ -10,6 +10,11 @@ jobs:
     steps:
     - name: Deploy using ssh
       uses: appleboy/ssh-action@master
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+        GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        JWT_SECRET: ${{ secrets.JWT_SECRET }}
       with:
         host: ${{ secrets.HOST }}
         username: ${{ secrets.USERNAME }}
@@ -47,19 +52,28 @@ jobs:
           else
               echo "☀️ Found uv at $(command -v uv)"
           fi
+
+          echo "🥷 setting up environment variables..."
+          
+          EQUIRED_VARS="DATABASE_URL JWT_SECRET GOOGLE_CLIENT_SECRET GOOGLE_CLIENT_ID"
+          for VAR_NAME in $REQUIRED_VARS; do
+              VALUE="${!VAR_NAME}"  
+              
+              if [ -z "$VALUE" ]; then
+                  echo "❗ $VAR_NAME is not set (forwarding failed). Exiting..."
+                  exit 1
+              fi
+              
+              echo "$VAR_NAME=$VALUE" >> .env
+          done
+          echo "Secrets written to .env ✅"
+
           
           echo "📦 setting up virtual environment and installing dependencies..."
           uv venv --clear -p python3.13 .venv
           source .venv/bin/activate
           uv pip install -q -r requirements.txt
-          
-          echo "🥷 setting up environment variables..."
-          if [ -z ${{ secrets.DATABASE_URL  }} ]; then
-              echo "❗ DATABASE_URL is not set in secrets. Exiting..."
-              exit 1
-          fi
-          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
-          
+                    
           echo "Build Complete ✅."
           echo "==============================="
           
