@@ -48,6 +48,97 @@ jobs:
           echo "Running Build commands...🚀"
           cd "$TARGET_DIR"
 
+          echo "🥷 setting up environment variables..."
+
+          SECRET_NAMES="DATABASE_URL GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET JWT_SECRET"
+          
+          for VAR in $SECRET_NAMES; do
+              VAL="${!VAR}"
+              if [ -z "$VAL" ]; then
+                  echo "❗ $VAR is not set. Exiting..."
+                  exit 1
+              fi
+              echo "$VAR=$VAL" >> .env
+          done
+          
+          if ! command -v uv >/dev/null 2>&1; then
+              echo "☀️ Installing uv..."
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              source ~/.bashrc
+          else
+              echo "☀️ Found uv at $(command -v uv)"
+          fi
+          
+          echo "📦 setting up virtual environment and installing dependencies..."
+          uv venv --clear -p python3.13 .venv
+          source .venv/bin/activate
+          uv pip install -q -r requirements.txt
+                    
+          echo "Build Complete ✅."
+          echo "==============================="
+          
+          echo "🚀 Starting application with pm2..."
+          if ! command -v pm2 >/dev/null 2>&1; then
+              echo "❗ PM2 not Found"
+              echo "install it with:  npm install pm2 -g"
+              exit 1
+          fi
+
+          echo "💾 creating proccess $NAME..."
+          pm2 delete $NAME || true
+          pm2 start "uv run uvicorn app.main:app --port $PORT --host 0.0.0.0" --name $NAME --time
+          pm2 save
+          echo "Application is running on port $PORT ✅."
+          echo "==============================="name: Deploy Refactor Backend
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Deploy using ssh
+      uses: appleboy/ssh-action@master
+      # 1. Map secrets to environment variables
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+        GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: 22
+        # 2. Forward the variable names to the remote server
+        envs: DATABASE_URL,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,JWT_SECRET
+        script: |
+          set -e
+          export PATH="$HOME/.local/bin:$PATH"
+        
+          echo "Running Deployment commands...🚀"
+          NAME="GDG-backend"
+          TARGET_DIR=~/$NAME
+          BRANCH=main
+          REPO_URL="https://github.com/Google-Developer-Group-Qassim-Unversity/score-leaderboard-Admin-app.git"
+          PORT=7501
+          PM2_PATH="/home/ubuntu/.nvm/versions/node/v24.12.0/bin/"
+          export PATH="$PM2_PATH:$PATH"
+          
+          echo "Cloning new repository..."
+          rm -rf "$TARGET_DIR"
+          git clone --branch $BRANCH "$REPO_URL" "$TARGET_DIR"
+          rm -rf $TARGET_DIR/Frontend
+          mv $TARGET_DIR/Backend/* $TARGET_DIR
+          rm -rf $TARGET_DIR/Backend
+          echo "Deployment Complete ✅."
+          echo "==============================="
+          
+          echo "Running Build commands...🚀"
+          cd "$TARGET_DIR"
+
           # --- SECRET CHECKING LOOP ---
           echo "🔐 Checking and writing secrets..."
           
