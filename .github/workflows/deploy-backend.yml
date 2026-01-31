@@ -10,18 +10,20 @@ jobs:
     steps:
     - name: Deploy using ssh
       uses: appleboy/ssh-action@master
+      # 1. Map secrets to environment variables here
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-        GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-        JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        SECRET_TWO: ${{ secrets.SECRET_TWO }}     # Replace with your actual secret name
+        SECRET_THREE: ${{ secrets.SECRET_THREE }} # Replace with your actual secret name
       with:
         host: ${{ secrets.HOST }}
         username: ${{ secrets.USERNAME }}
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: 22
+        # 2. Tell the action to forward these specific variables to the remote server
+        envs: DATABASE_URL,SECRET_TWO,SECRET_THREE
         script: |
-          set -e # stops the script if any command fails
+          set -e
           export PATH="$HOME/.local/bin:$PATH"
         
           echo "Running Deployment commands...🚀"
@@ -44,6 +46,30 @@ jobs:
           
           echo "Running Build commands...🚀"
           cd "$TARGET_DIR"
+
+          # --- SECRET CHECKING LOOP START ---
+          echo "🔐 Checking and writing secrets..."
+          
+          # List the variable NAMES here (space separated)
+          REQUIRED_VARS="DATABASE_URL SECRET_TWO SECRET_THREE"
+          
+          # Clean existing .env to avoid duplicates
+          rm -f .env 
+
+          for VAR_NAME in $REQUIRED_VARS; do
+              # Use indirect expansion to get the value from the variable name
+              VALUE="${!VAR_NAME}"
+              
+              if [ -z "$VALUE" ]; then
+                  echo "❗ $VAR_NAME is not set (forwarding failed). Exiting..."
+                  exit 1
+              fi
+              
+              # Append to .env
+              echo "$VAR_NAME=$VALUE" >> .env
+          done
+          echo "Secrets written to .env ✅"
+          # --- SECRET CHECKING LOOP END ---
           
           if ! command -v uv >/dev/null 2>&1; then
               echo "☀️ Installing uv..."
@@ -52,22 +78,6 @@ jobs:
           else
               echo "☀️ Found uv at $(command -v uv)"
           fi
-
-          echo "🥷 setting up environment variables..."
-          
-          EQUIRED_VARS="DATABASE_URL JWT_SECRET GOOGLE_CLIENT_SECRET GOOGLE_CLIENT_ID"
-          for VAR_NAME in $REQUIRED_VARS; do
-              VALUE="${!VAR_NAME}"  
-              
-              if [ -z "$VALUE" ]; then
-                  echo "❗ $VAR_NAME is not set (forwarding failed). Exiting..."
-                  exit 1
-              fi
-              
-              echo "$VAR_NAME=$VALUE" >> .env
-          done
-          echo "Secrets written to .env ✅"
-
           
           echo "📦 setting up virtual environment and installing dependencies..."
           uv venv --clear -p python3.13 .venv
@@ -90,5 +100,3 @@ jobs:
           pm2 save
           echo "Application is running on port $PORT ✅."
           echo "==============================="
-          
-            
