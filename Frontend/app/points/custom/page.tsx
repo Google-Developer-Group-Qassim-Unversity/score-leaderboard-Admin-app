@@ -11,7 +11,7 @@ import { CustomEventsList } from "@/components/custom-events-list";
 import { getEvents } from "@/lib/api";
 import type { Event } from "@/lib/api-types";
 
-export default function PointsPage() {
+export default function CustomEventsPage() {
   const [customEvents, setCustomEvents] = useState<Event[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<{ message: string; isServerError?: boolean } | null>(null);

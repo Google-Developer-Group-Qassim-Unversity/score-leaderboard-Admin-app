@@ -3,16 +3,16 @@
 import * as React from "react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Trophy, AlertCircle, Calendar } from "lucide-react";
+import { AlertCircle, Calendar, CalendarPlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { CustomEventsList } from "@/components/custom-events-list";
+import { FullEventsPointsList } from "@/components/full-events-points-list";
 import { getEvents } from "@/lib/api";
 import type { Event } from "@/lib/api-types";
 
-export default function PointsPage() {
-  const [customEvents, setCustomEvents] = useState<Event[]>([]);
+export default function FullEventsPage() {
+  const [fullEvents, setFullEvents] = useState<Event[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<{ message: string; isServerError?: boolean } | null>(null);
 
@@ -22,10 +22,10 @@ export default function PointsPage() {
       setError(null);
       const response = await getEvents();
       if (response.success) {
-        const custom = response.data.filter(
-          (e) => e.location_type === "none" || e.location_type === "hidden"
+        const full = response.data.filter(
+          (e) => e.location_type !== "none" && e.location_type !== "hidden"
         );
-        setCustomEvents(custom);
+        setFullEvents(full);
       } else {
         setError(response.error);
       }
@@ -63,22 +63,23 @@ export default function PointsPage() {
     );
   }
 
-  if (customEvents.length === 0) {
+  if (fullEvents.length === 0) {
     return (
       <div className="flex justify-center">
         <Alert className="max-w-2xl">
           <Calendar className="h-4 w-4" />
-          <AlertTitle>No Custom Events Yet</AlertTitle>
+          <AlertTitle>No Full Events Yet</AlertTitle>
           <AlertDescription>
-            Get started by creating your first custom point event.
+            Full events are created from the Events page. Create an event
+            there to manage its points here.
             <div className="mt-4">
               <Button asChild size="sm">
                 <Link
-                  href="/points/create"
+                  href="/events/create"
                   className="flex items-center gap-2"
                 >
-                  <Trophy className="h-4 w-4" />
-                  Create Your First Custom Event
+                  <CalendarPlus className="h-4 w-4" />
+                  Create Event
                 </Link>
               </Button>
             </div>
@@ -88,5 +89,5 @@ export default function PointsPage() {
     );
   }
 
-  return <CustomEventsList events={customEvents} />;
+  return <FullEventsPointsList events={fullEvents} />;
 }
