@@ -29,7 +29,7 @@ jobs:
           export PATH="$PM2_PATH:$PATH"
 
           INFISICAL_ENV="prod"
-          INFISICAL_ENV_PATH="/"
+          INFISICAL_ENV_PATH="/admin-backend"
           INFISICAL_PROJECT_ID="300b1e97-7e52-4a4e-872d-053b9082cac5"
 
           echo "Cloning new repository..."
