@@ -89,7 +89,7 @@ jobs:
 
           echo "💾 creating proccess $NAME..."
           pm2 delete $NAME || true
-          pm2 start "INFISICAL_TOKEN=$INFISICAL_TOKEN infisical run --env $INFISICAL_ENV --path='$INFISICAL_ENV_PATH' --projectId=$INFISICAL_PROJECT_ID -- uv run uvicorn app.main:app --port $PORT --host 0.0.0.0 --workers 4" --name $NAME --time
+          pm2 start "INFISICAL_TOKEN=$INFISICAL_TOKEN infisical run --env=$INFISICAL_ENV --path='$INFISICAL_ENV_PATH' --projectId=$INFISICAL_PROJECT_ID -- uv run uvicorn app.main:app --port $PORT --host 0.0.0.0 --workers 4" --name $NAME --time
           pm2 save
           echo "Application is running on port $PORT ✅."
           echo "==============================="
