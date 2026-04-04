@@ -1,0 +1,49 @@
+name: Backend Migration Check
+
+on:
+  push:
+    branches: [main]
+    paths: ["Backend/**"]
+  pull_request:
+    branches: [main]
+    paths: ["Backend/**"]
+
+jobs:
+  migration:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Backend
+
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: test_db
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run migrations on fresh DB
+        env:
+          DATABASE_URL: "mysql+pymysql://root:root@127.0.0.1:3306/test_db"
+        run: uv run alembic upgrade head
