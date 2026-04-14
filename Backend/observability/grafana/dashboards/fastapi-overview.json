@@ -1,0 +1,162 @@
+{
+  "annotations": { "list": [] },
+  "description": "Auto-instrumented FastAPI observability",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Request Rate (req/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "targets": [
+        {
+          "expr": "sum(rate(score_leaderboard_http_server_duration_milliseconds_count[$__rate_interval])) by (http_method, http_status_code)",
+          "legendFormat": "{{http_method}} {{http_status_code}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "drawStyle": "line", "fillOpacity": 20 }
+        }
+      }
+    },
+    {
+      "title": "Request Latency (p50, p95, p99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(score_leaderboard_http_server_duration_milliseconds_bucket[$__rate_interval])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(score_leaderboard_http_server_duration_milliseconds_bucket[$__rate_interval])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(score_leaderboard_http_server_duration_milliseconds_bucket[$__rate_interval])) by (le))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "drawStyle": "line", "fillOpacity": 10 }
+        }
+      }
+    },
+    {
+      "title": "Error Rate (5xx/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "targets": [
+        {
+          "expr": "sum(rate(score_leaderboard_http_server_duration_milliseconds_count{http_status_code=~\"5..\"}[$__rate_interval]))",
+          "legendFormat": "5xx errors"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 30 }
+        }
+      }
+    },
+    {
+      "title": "Active Requests",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "targets": [
+        {
+          "expr": "sum(score_leaderboard_http_server_active_requests)",
+          "legendFormat": "active"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "color": { "mode": "value" } }
+      }
+    },
+    {
+      "title": "Latency by Endpoint",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(score_leaderboard_http_server_duration_milliseconds_bucket[$__rate_interval])) by (le, http_target))",
+          "format": "table", "instant": true, "legendFormat": ""
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(score_leaderboard_http_server_duration_milliseconds_bucket[$__rate_interval])) by (le, http_target))",
+          "format": "table", "instant": true, "legendFormat": ""
+        },
+        {
+          "expr": "sum(rate(score_leaderboard_http_server_duration_milliseconds_count[$__rate_interval])) by (http_target)",
+          "format": "table", "instant": true, "legendFormat": ""
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "renameByName": {
+              "Value #A": "p50 (ms)",
+              "Value #B": "p95 (ms)",
+              "Value #C": "req/s"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "title": "Recent Traces",
+      "type": "traces",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "tempo", "uid": "${DS_TEMPO}" },
+      "targets": [
+        {
+          "query": "{resource.service.name=\"score-leaderboard-backend\"}",
+          "queryType": "traceql",
+          "refId": "A",
+          "limit": 20
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 40,
+  "tags": ["fastapi", "otel"],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROM",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "selectedValue": { "text": "Prometheus", "value": "prometheus" } }
+      },
+      {
+        "name": "DS_TEMPO",
+        "type": "datasource",
+        "query": "tempo",
+        "current": { "selectedValue": { "text": "Tempo", "value": "tempo" } }
+      }
+    ]
+  },
+  "time": { "from": "now-15m", "to": "now" },
+  "title": "FastAPI Observability",
+  "uid": "fastapi-otel"
+}

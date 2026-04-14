@@ -1,0 +1,57 @@
+# ── Receivers: How data gets INTO the Collector ──
+# The Collector listens on these endpoints for telemetry from your app.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+# ── Processors: Optional transformations on the data ──
+# batch: groups spans/metrics/logs into batches before exporting.
+# Reduces the number of network requests. Tradeoff: slightly higher latency
+# (waits up to 5s or 100 items before sending), but much better throughput.
+processors:
+  batch:
+    send_batch_size: 100
+    timeout: 5s
+
+# ── Exporters: Where data goes OUT of the Collector ──
+exporters:
+  # Exposes a /metrics endpoint that Prometheus scrapes.
+  # This is the bridge between the push-based OTLP pipeline
+  # and the pull-based Prometheus model.
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: "score_leaderboard"
+
+  # Sends traces to Tempo via OTLP gRPC.
+  # The Collector speaks OTLP to Tempo just like your app speaks OTLP to the Collector.
+  otlp/tempo:
+    endpoint: "tempo:4317"
+    tls:
+      insecure: true
+
+  # Sends logs to Loki via OTLP HTTP.
+  # Loki 3.x natively supports OTLP log ingestion on /otlp/v1/logs.
+  otlphttp/loki:
+    endpoint: "http://loki:3100/otlp/v1/logs"
+
+# ── Service Pipelines: Wire receivers → processors → exporters ──
+# Each pillar (metrics, traces, logs) has its own independent pipeline.
+# You can mix and match — e.g., send metrics to BOTH Prometheus and another backend.
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/tempo]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/loki]
