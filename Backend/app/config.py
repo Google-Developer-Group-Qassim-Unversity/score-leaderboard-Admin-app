@@ -109,6 +109,22 @@ class Config:
     def R2_PUBLIC_URL(self) -> str:
         return env_or_except("R2_PUBLIC_URL")
 
+    @property
+    def OTEL_ENABLED(self) -> bool:
+        return os.getenv("OTEL_ENABLED", "false").lower() == "true"
+
+    @property
+    def OTEL_SERVICE_NAME(self) -> str:
+        return env_or_except("OTEL_SERVICE_NAME", "scores-admin-backend")
+
+    @property
+    def OTEL_EXPORTER_OTLP_ENDPOINT(self) -> str:
+        return env_or_except("OTEL_EXPORTER_OTLP_ENDPOINT")
+
+    @property
+    def OTEL_EXPORTER_OTLP_HEADERS(self) -> str:
+        return env_or_except("OTEL_EXPORTER_OTLP_HEADERS")
+
 
 def env_or_except(key: str, default: Optional[str] = None) -> str:
     value = os.getenv(key)
