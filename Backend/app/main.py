@@ -18,12 +18,15 @@ from app.routers import (
     points,
     health,
 )
+from app.telemetry import setup_telemetry
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"]
 )
+
+setup_telemetry(app)
 
 
 @app.exception_handler(OperationalError)
