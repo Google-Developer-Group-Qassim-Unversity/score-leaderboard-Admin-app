@@ -9,7 +9,7 @@ from app.DB import (
     logs as log_queries,
     members as member_queries,
 )
-from app.DB.main import SessionLocal
+from app.DB.main import SessionDep
 from app.DB.schema import Events, Logs
 from app.routers.models import (
     NotFoundResponse,
@@ -70,10 +70,11 @@ def get_target_date_for_day(event: Events, day: int | None) -> datetime:
 @router.post("/{event_id:int}", status_code=status.HTTP_200_OK)
 def mark_attendance(
     event_id: int,
+    session: SessionDep,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(authenticated_guard)],
     token: Annotated[str | None, Query(description="Optional attendance token for QR code links")] = None,
 ):
-    with LogFile("mark attendance"), SessionLocal() as session:
+    with LogFile("mark attendance"):
         try:
             # Validate attendance token
             if token:
@@ -160,10 +161,11 @@ def mark_attendance(
 def backfill_attendance(
     event_id: int,
     request: BackfillAttendanceRequest,
+    session: SessionDep,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(admin_guard)],
 ):
 
-    with LogFile("backfill attendance"), SessionLocal() as session:
+    with LogFile("backfill attendance"):
         try:
             write_log_title(
                 f"Backfill attendance for event [{event_id}], {len(request.members)} members, day [{request.day}]"
@@ -228,6 +230,7 @@ def backfill_attendance(
 @router.get("/{event_id:int}", status_code=status.HTTP_200_OK, response_model=EventAttendanceResponse)
 def get_event_attendance(
     event_id: int,
+    session: SessionDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(optional_clerk_guard)] = None,
     type: Annotated[
         Literal["count", "detailed", "me"],
@@ -240,50 +243,48 @@ def get_event_attendance(
         ),
     ] = "all",
 ):
-    with SessionLocal() as session:
-        event = events_queries.get_event_by_id(session, event_id)
+    event = events_queries.get_event_by_id(session, event_id)
 
-        event_days = get_event_days(event)
-        if isinstance(day, int) and (day < 1 or day > event_days):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Day {day} is out of range. Event has {event_days} day(s).",
-            )
-
-        if type == "count":
-            attendance = log_queries.get_event_attendance(session, event_id, day)
-            return EventAttendanceResponse(attendance_count=len(attendance), attendance=None)
-
-        if type == "detailed":
-            if not credentials or not is_admin(credentials):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required for detailed attendance"
-                )
-            attendance = log_queries.get_event_attendance(session, event_id, day)
-            return EventAttendanceResponse(attendance_count=len(attendance), attendance=attendance)
-
-        if type == "me":
-            if not credentials:
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
-            uni_id = credentials_to_member_model(credentials).uni_id
-            member = member_queries.get_member_by_uni_id(session, uni_id)
-            attendance = log_queries.get_event_attendance(session, event_id, day)
-            member_attendance = [a for a in attendance if a.Member.uni_id == uni_id]
-            return EventAttendanceResponse(attendance_count=len(member_attendance), attendance=member_attendance)
-
+    event_days = get_event_days(event)
+    if isinstance(day, int) and (day < 1 or day > event_days):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid type '{type}'. Must be 'count', 'detailed', or 'me'.",
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Day {day} is out of range. Event has {event_days} day(s)."
         )
+
+    if type == "count":
+        attendance = log_queries.get_event_attendance(session, event_id, day)
+        return EventAttendanceResponse(attendance_count=len(attendance), attendance=None)
+
+    if type == "detailed":
+        if not credentials or not is_admin(credentials):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required for detailed attendance"
+            )
+        attendance = log_queries.get_event_attendance(session, event_id, day)
+        return EventAttendanceResponse(attendance_count=len(attendance), attendance=attendance)
+
+    if type == "me":
+        if not credentials:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+        uni_id = credentials_to_member_model(credentials).uni_id
+        member = member_queries.get_member_by_uni_id(session, uni_id)
+        attendance = log_queries.get_event_attendance(session, event_id, day)
+        member_attendance = [a for a in attendance if a.Member.uni_id == uni_id]
+        return EventAttendanceResponse(attendance_count=len(member_attendance), attendance=member_attendance)
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid type '{type}'. Must be 'count', 'detailed', or 'me'."
+    )
 
 
 @router.post("/{event_id}/manual", status_code=status.HTTP_200_OK)
 def mark_attendance_manual(
     event_id: int,
     request: ManualAttendanceRequest,
+    session: SessionDep,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(admin_guard)],
 ):
-    with LogFile("mark attendance manual"), SessionLocal() as session:
+    with LogFile("mark attendance manual"):
         try:
             write_log_title(f"Manual attendance for event [{event_id}], members {request.member_ids}")
 
@@ -343,9 +344,10 @@ def mark_attendance_manual(
 def remove_attendance_manual(
     event_id: int,
     request: ManualAttendanceRequest,
+    session: SessionDep,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(admin_guard)],
 ):
-    with LogFile("remove attendance manual"), SessionLocal() as session:
+    with LogFile("remove attendance manual"):
         try:
             write_log_title(f"Remove attendance for event [{event_id}], members {request.member_ids}")
 

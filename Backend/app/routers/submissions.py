@@ -2,7 +2,7 @@ import json
 from time import perf_counter
 from typing import Literal, Annotated
 from fastapi import APIRouter, Depends, Request, status, HTTPException, BackgroundTasks
-from app.DB.main import SessionLocal
+from app.DB.main import SessionDep, SessionLocal
 from app.DB import submissions as submission_queries, members as member_queries, forms as form_queries
 from fastapi_clerk_auth import HTTPAuthorizationCredentials
 from app.helpers import admin_guard, get_uni_id_from_credentials, authenticated_guard
@@ -31,28 +31,30 @@ router = APIRouter()
 @router.post("/{form_id:int}", status_code=status.HTTP_200_OK)
 def create_submission(
     form_id: int,
+    session: SessionDep,
     submission_type: Literal["none", "partial"],
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(config.CLERK_GUARD)],
 ):
-    with SessionLocal() as session:
-        try:
-            uni_id = get_uni_id_from_credentials(credentials)
-            member_id = member_queries.get_member_by_uni_id(session, uni_id).id
-            new_submission = submission_queries.create_submission(session, form_id, submission_type, member_id)
-            if not new_submission:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Submission already exists")
-            session.commit()
-            return new_submission
-        except Exception:
-            session.rollback()
-            raise
+    try:
+        uni_id = get_uni_id_from_credentials(credentials)
+        member_id = member_queries.get_member_by_uni_id(session, uni_id).id
+        new_submission = submission_queries.create_submission(session, form_id, submission_type, member_id)
+        if not new_submission:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Submission already exists")
+        session.commit()
+        return new_submission
+    except Exception:
+        session.rollback()
+        raise
 
 
 @router.get("/{form_id:int}", status_code=status.HTTP_200_OK, response_model=submission_exists_model)
 def check_submission_exists(
-    form_id: int, credentials: Annotated[HTTPAuthorizationCredentials, Depends(authenticated_guard)]
+    form_id: int,
+    session: SessionDep,
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(authenticated_guard)],
 ):
-    with LogFile("check submission exists"), SessionLocal() as session:
+    with LogFile("check submission exists"):
         try:
             uni_id = get_uni_id_from_credentials(credentials)
 
@@ -77,20 +79,20 @@ def check_submission_exists(
 @router.put("/accept", status_code=status.HTTP_200_OK)
 def accept_submission(
     submissions: list[submission_accept_model],
+    session: SessionDep,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(admin_guard)],
 ):
-    with SessionLocal() as session:
-        try:
-            for submission in submissions:
-                submission = submission_queries.update_is_accepted(
-                    session, submission.submission_id, submission.is_accepted
-                )
-                if submission is None:
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Submission not found")
-            session.commit()
-            return {"status": "success"}
-        except Exception:
-            raise
+    try:
+        for submission in submissions:
+            submission = submission_queries.update_is_accepted(
+                session, submission.submission_id, submission.is_accepted
+            )
+            if submission is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Submission not found")
+        session.commit()
+        return {"status": "success"}
+    except Exception:
+        raise
 
 
 # ====================== Google Forms API ======================

@@ -46,8 +46,9 @@ uv run alembic revision -m "desc"              # new empty migration (write manu
 - **`app/main.py`** – FastAPI app, CORS, router registration, static file mount for uploads
 - **`app/config.py`** – all env vars accessed through `config` singleton; `ENV=testing` skips dotenv loading
 - **`app/DB/schema.py`** – SQLAlchemy ORM models (source of truth for DB schema). Alembic uses `Base.metadata` from here
-- **`app/DB/main.py`** – `SessionLocal` and `engine` creation
+- **`app/DB/main.py`** – `engine`, `SessionLocal`, and the **`get_db()`** FastAPI dependency (yield a session per request); also exports the `SessionDep = Annotated[Session, Depends(get_db)]` alias
 - **`app/routers/`** – API route handlers, one file per domain (events, members, points, etc.)
+- **DB session policy:** route handlers acquire the session via `session: SessionDep` (FastAPI DI). Background jobs and non-route helpers (e.g. in `submissions.py`, `submissions_manual.py`, `emails.py` background tasks/SSE closures, and `get_from_address`) use `with SessionLocal() as session:` directly because they have no request scope. Do not introduce new `with SessionLocal()` blocks inside `@router.*`-decorated handlers — use `SessionDep` instead.
 - **`app/helpers.py`** – shared utilities and auth guards (`authenticated_guard`, `admin_guard`, `super_admin_guard`)
 - **`alembic/env.py`** – migration env; excludes DB views listed in `VIEWS` set via `include_object`
 - **Source of truth for DB**: `app/DB/schema.py` + existing migration files
