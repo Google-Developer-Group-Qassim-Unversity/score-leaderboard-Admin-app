@@ -1,0 +1,98 @@
+# Phase 0 — Baseline (Captured Before Any Code Edits)
+
+> This file is the authoritative Phase 0 baseline for the
+> `with SessionLocal()` → `Depends(get_db)` migration described in
+> `docs/migrations/db-dependency-migration/PLAN.md`.
+>
+> All numbers below were captured on branch `refactor/db-dependency-injection`
+> **immediately before** Commit 1's pilot edits were applied — they reflect the
+> state of `main` at the time the branch was created. The pilot edits
+> (`app/DB/main.py` + `app/routers/departments.py`) were then applied on top of
+> this baseline and re-verified (see "Post-pilot verification" at the bottom).
+
+## Environment
+
+- **cwd:** `Backend/`
+- **git branch (at capture time):** `main`
+- **Python:** 3.13.9
+- **pytest:** 9.0.2 with `pytest-cov` 7.1.0 (`--cov=app` is on by default via `pyproject.toml`)
+- **testcontainers:** MySQL 8.0 (Docker daemon active, no containers pre-running)
+- **uv:** 0.9.13
+- **infisical:** installed but NOT required for tests (`tests/conftest.py` self-sets all required env vars)
+
+## Baseline numbers
+
+| Metric | Value | Source artifact (in `/tmp/opencode/baseline/`) |
+|---|---|---|
+| **pytest** | 108 passed / 0 failed / 0 errors / 0 skipped — 19.71s | `junit.xml`, `pytest.log` |
+| **coverage TOTAL** | 3467 stmts / 1462 miss / **58%** | `coverage.txt` (extracted from `pytest.log`) |
+| **ruff check** | 4 errors (pre-existing, all `TID252` `Annotated`-vs-`Depends` style) | `ruff.log` |
+| **mypy** | 34 errors in 12 files (checked 55 source files) — pre-existing | `mypy.log` |
+| **OpenAPI snapshot** | **60 paths**, 74 total methods | `openapi.json` |
+| **Endpoint inventory** | **74 `@router.*` decorators** across `app/routers/` | `endpoints.txt` |
+
+## Per-router occurrence counts (`with SessionLocal() as session:`)
+
+These match PLAN.md §3.4 and were used to size the work:
+
+| File | Occurrences | Notes |
+|---|---|---|
+| `app/routers/departments.py` | 2 | Pilot — Commit 1 |
+| `app/routers/forms.py` | 2 | one is `with LogFile(...) as log, SessionLocal() as session:` |
+| `app/routers/action.py` | 6 | one has nested `session.commit()` + `session.refresh()` |
+| `app/routers/points.py` | 4 | each block ends with logic *after* the `with` |
+| `app/routers/health.py` | 1 | keep `engine` direct import — pool status uses `engine.pool.*` |
+| `app/routers/members.py` | 5 | one is `with LogFile(...) as log, SessionLocal() as session:` |
+| `app/routers/attendance.py` | 1 | biggest route handler; nested helpers take `session` as param already |
+| `app/routers/events.py` | 6 | one is `with LogFile(...), SessionLocal() as session:`; `create_event`/`update_event` have `session.refresh(new_event)` after commit — keep them |
+| `app/routers/submissions.py` | 6 | **route handlers only** — helpers stay on `SessionLocal()` |
+| `app/routers/custom.py` | many | several `with LogFile(...), SessionLocal() as session:` |
+| `app/routers/emails.py` | 11 | **route handlers only** — background jobs + SSE closures stay on `SessionLocal()` |
+| `app/routers/submissions_manual.py` | 1 | **helper only — leave entirely untouched** |
+
+## Safety-net policy
+
+For Phase 2 (Commit 2) and Phase 3 (Commit 3) the following must hold vs this
+baseline:
+
+1. **OpenAPI snapshot byte-identical** — generator deps don't surface in the schema.
+2. **Endpoint inventory identical** — `@router.*` decorator count must match (modulo line-number shifts from removed `with` lines, which are expected).
+3. **Coverage `TOTAL` line not lower** than 58%.
+4. **pytest pass/fail counts identical or better.**
+5. **No new ruff/mypy errors on lines I added or modified** (pre-existing errors elsewhere are OK per `AGENTS.md`).
+
+## Post-pilot verification (Commit 1 applied)
+
+After applying Commit 1 (`get_db` + `SessionDep` in `app/DB/main.py`, pilot
+migration of the two routes in `app/routers/departments.py`):
+
+| Metric | Phase 0 baseline | Post-pilot | Diff |
+|---|---|---|---|
+| pytest | 108 passed / 0 failed / 0 errors / 0 skipped | 108 passed / 0 failed / 0 errors / 0 skipped — 16.86s | identical ✅ |
+| coverage TOTAL | 3467 / 1462 / 58% | 3474 / 1464 / 58% | +7 stmts (new `get_db`/`SessionDep` code), same % ✅ |
+| ruff errors | 4 | 4 | identical ✅ |
+| mypy errors on changed files | 0 | 0 | identical ✅ (34 pre-existing untouched) |
+| OpenAPI paths | 60 | 60 | byte-identical ✅ |
+| Endpoint inventory | 74 decorators | 74 decorators | identical (only `departments.py:16`→`:15` line shift) ✅ |
+
+Business logic unchanged. Test harness still uses the legacy
+`SessionLocal.configure(bind=...)` hack in `tests/conftest.py`; Commit 3 will
+replace it with `app.dependency_overrides[get_db]`.
+
+## Commit 1 scope
+
+Only two files were modified in Commit 1:
+
+- `app/DB/main.py` — added `get_db()` generator dependency and `SessionDep = Annotated[Session, Depends(get_db)]` alias.
+- `app/routers/departments.py` — migrated both route handlers (`get_all_departments`, `get_department_by_id`) from `with SessionLocal() as session:` to `session: SessionDep`.
+
+No other files were touched. No test files were modified. No `AGENTS.md` edit yet (that lands in Commit 2 per PLAN.md §6.5).
+
+## Reference
+
+- Full migration plan: `docs/migrations/db-dependency-migration/PLAN.md`
+- Baseline artifacts (not committed): `/tmp/opencode/baseline/`
+  - `junit.xml`, `pytest.log`, `coverage.txt`
+  - `ruff.log`, `mypy.log`
+  - `openapi.json`, `capture_openapi.py`
+  - `endpoints.txt`

@@ -1,6 +1,10 @@
+from collections.abc import Generator
+from typing import Annotated
+
+from fastapi import Depends
 from sqlalchemy import create_engine
 from sqlalchemy.engine.url import make_url
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import config
 
@@ -36,3 +40,17 @@ engine = create_engine(
     connect_args=_build_connect_args(config.DATABASE_URL),
 )
 SessionLocal = sessionmaker(bind=engine, autocommit=False, expire_on_commit=False)
+
+
+def get_db() -> Generator[Session, None, None]:
+    """FastAPI dependency: yield a session per request and close it on exit."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# Convenience alias — uses Annotated so it can be used as a parameter type
+# without needing Depends() inline at every call site.
+SessionDep = Annotated[Session, Depends(get_db)]
