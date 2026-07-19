@@ -4,7 +4,7 @@
 |---|---|
 | Test DB | Real MySQL 8.0 via testcontainers (or `DATABASE_URL` env var for CI) |
 | Schema setup | Alembic migrations (`command.upgrade`), not `create_all` |
-| Test isolation | Per-function transaction + rollback; `SessionLocal` is reconfigured in-place |
+| Test isolation | Per-function transaction + rollback via a shared `_test_db_connection` fixture; `get_db` is overridden with `app.dependency_overrides[get_db]` so route handlers receive a session bound to the test connection (no global `SessionLocal.configure` mutation) |
 | Auth bypass | FastAPI `app.dependency_overrides[admin_guard]` with fake credentials |
 | Test client | `fastapi.testclient.TestClient` (synchronous) |
 | Data factories | Simple `make_*()` functions with **overrides pattern** |

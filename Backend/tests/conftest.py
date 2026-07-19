@@ -8,9 +8,11 @@ Fixture chain (scope):
         |
     seed_core_data (session) ─── seeds the DB
         |
-        ├── db_session (function) ─── per-test session with rollback (depends on client)
+    _test_db_connection (function) ─── opens a connection + begins transaction (shared by client & db_session)
         |
-        └── client (function) ─── FastAPI TestClient (no auth overrides → 403 on guarded endpoints)
+        ├── db_session (function) ─── per-test session bound to _test_db_connection
+        |
+        └── client (function) ─── FastAPI TestClient with get_db overridden to bind to _test_db_connection
                 |
                 └── clerk_client (function) ─── bypasses authenticated_guard (Clerk credentials with member metadata)
                         |
@@ -161,30 +163,58 @@ def seed_core_data(engine):
 
 
 @pytest.fixture(scope="function")
-def client(engine, seed_core_data) -> Generator:
+def _test_db_connection(engine, seed_core_data):
     """
-    Provide a FastAPI test client with transaction rollback.
+    Internal fixture that opens a single connection and begins a transaction.
 
-    Reconfigures SessionLocal **in-place** so every module that imported it
-    (via ``from app.DB.main import SessionLocal``) will create sessions bound
-    to a single test-scoped connection.  After the test the transaction is
-    rolled back, undoing every INSERT/UPDATE/DELETE the routes committed.
+    Both the ``client`` fixture (which overrides ``get_db``) and the
+    ``db_session`` fixture (used for direct test-side DB access) share this
+    connection so route-side and test-side writes are mutually visible. The
+    outer transaction is rolled back at fixture teardown, undoing every
+    INSERT/UPDATE/DELETE the routes or the test committed.
+
+    This replaces the legacy ``SessionLocal.configure(bind=connection)`` hack
+    with explicit connection sharing via a fixture-local closure.
     """
-    import app.DB.main as db_main
-    from app.main import app
-
     connection = engine.connect()
     transaction = connection.begin()
-
-    original_bind = db_main.SessionLocal.kw["bind"]
-    db_main.SessionLocal.configure(bind=connection)
-
-    yield TestClient(app)
-
-    db_main.SessionLocal.configure(bind=original_bind)
+    yield connection
     if transaction.is_active:
         transaction.rollback()
     connection.close()
+
+
+@pytest.fixture(scope="function")
+def client(_test_db_connection) -> Generator:
+    """
+    Provide a FastAPI test client with transaction rollback.
+
+    Overrides the ``get_db`` dependency so every route handler receives a
+    session bound to the single test-scoped connection from
+    ``_test_db_connection``. After the test the outer transaction is rolled
+    back, undoing every INSERT/UPDATE/DELETE the routes committed.
+    """
+    from collections.abc import Generator as Gen
+
+    from app.DB.main import SessionLocal, get_db
+    from app.main import app
+
+    connection = _test_db_connection
+
+    def override_get_db() -> Gen:
+        # Bind a Session to the test connection. Bind at the Session level
+        # (not the sessionmaker) so production SessionLocal stays untouched.
+        session = SessionLocal(bind=connection)
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    yield TestClient(app)
+
+    app.dependency_overrides.pop(get_db, None)
 
 
 FAKE_CLERK_CREDENTIALS = ClerkHTTPAuthorizationCredentials(
@@ -260,16 +290,16 @@ def admin_client(clerk_client) -> Generator:
 
 
 @pytest.fixture(scope="function")
-def db_session(client):
+def db_session(_test_db_connection):
     """
-    Provide a SQLAlchemy session bound to the test transaction.
-
-    Use this fixture when tests need direct DB access (e.g., inserting test data).
-    All changes will be rolled back after the test via the client fixture's transaction.
+    Provide a SQLAlchemy session bound to the same connection/transaction as
+    the overridden ``get_db``. Use this fixture when tests need direct DB
+    access (e.g., inserting test data). All changes will be rolled back after
+    the test via the ``_test_db_connection`` fixture's outer transaction.
     """
     from app.DB.main import SessionLocal
 
-    session = SessionLocal()
+    session = SessionLocal(bind=_test_db_connection)
     try:
         yield session
     finally:
