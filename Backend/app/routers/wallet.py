@@ -1,21 +1,18 @@
 import logging
 import os
-import uuid as uuid_lib
 from typing import Annotated, Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from pydantic import BaseModel, Field
 
-from app.config import config
 from app.DB.main import SessionLocal
+from app.DB import members as member_queries
 from app.DB.wallet import (
-    get_member_by_uni_id_or_none,
-    get_member_by_email_or_none,
     get_or_create_member_profile,
     get_public_profile_by_uuid,
     is_member_admin,
     update_member_profile,
 )
-from app.helpers import authenticated_guard, get_uni_id_from_credentials
+from app.helpers import authenticated_guard, resolve_member
 from app.wallet_signer import generate_apple_pkpass, generate_google_wallet_pass_url
 
 logger = logging.getLogger(__name__)
@@ -63,108 +60,39 @@ class UpdateWalletMePayload(BaseModel):
 # =============================================================================
 
 
-def _resolve_authenticated_member(session, credentials):
+def _resolve_pass_card_data(session, credentials, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Safely resolves the authenticated Member from Clerk credentials
-    using uni_id or email fallback.
-    """
-    member = None
-    uni_id = None
-    try:
-        uni_id = get_uni_id_from_credentials(credentials)
-        if uni_id:
-            member = get_member_by_uni_id_or_none(session, str(uni_id))
-    except Exception as e:
-        logger.info(f"uni_id extraction note: {e}")
-
-    if not member:
-        try:
-            decoded = credentials.model_dump().get("decoded", {})
-            email = (
-                decoded.get("email") or decoded.get("primary_email_address") or decoded.get("metadata", {}).get("email")
-            )
-            if email:
-                member = get_member_by_email_or_none(session, str(email).strip().lower())
-        except Exception as e:
-            logger.info(f"email fallback note: {e}")
-
-    if not member:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"عضو غير مسجل في قاعدة البيانات الأساسية بعد ({uni_id or 'حساب جديد'}).",
-        )
-
-    return member
-
-
-def _resolve_pass_card_data(request: Request, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """
-    Hybrid resolver:
-    1. If user is authenticated via Clerk token and registered in DB -> loads authoritative member, profile, and roles.
-    2. If guest or unregistered -> uses incoming payload directly (safely falling back to member blue card if gold requested by non-admin).
+    Builds Apple/Google Wallet pass data from the authenticated member's DB
+    record (the same identity `resolve_member` resolves for every other
+    endpoint). ``payload`` may only override the cosmetic ``themeId`` for a
+    live preview - it can never substitute for a real member.
     """
     card_data = dict(payload or {})
-    auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
+    member = resolve_member(session, credentials)
+    profile = get_or_create_member_profile(session, member.id)
+    session.commit()
 
-    if auth_header and auth_header.startswith("Bearer "):
-        try:
-            with SessionLocal() as session:
-                credentials = authenticated_guard(request)
-                member = _resolve_authenticated_member(session, credentials)
-                if member:
-                    profile = get_or_create_member_profile(session, member.id)
-                    session.commit()
-                    is_admin = is_member_admin(member)
-                    theme_id = profile.theme_id or card_data.get("themeId", "gdg-blue")
-                    if theme_id == "gdg-gold-admin" and not is_admin:
-                        theme_id = "gdg-blue"
-
-                    effective_name = profile.custom_name or card_data.get("fullName") or member.name
-
-                    return {
-                        "uuid": profile.uuid,
-                        "fullName": effective_name,
-                        "uniId": member.uni_id,
-                        "email": member.email or card_data.get("email", ""),
-                        "phone": member.phone_number or card_data.get("phone", ""),
-                        "uniCollege": profile.institution
-                        or member.uni_college
-                        or card_data.get("institution")
-                        or card_data.get("uniCollege", "جامعة القصيم"),
-                        "major": profile.major or member.uni_college or card_data.get("major", "علوم حاسب"),
-                        "userStatus": profile.user_status or card_data.get("userStatus", "student"),
-                        "educationLevel": profile.education_level or card_data.get("educationLevel", "university"),
-                        "studyYearOrLevel": profile.study_year_or_level or card_data.get("studyYearOrLevel", ""),
-                        "themeId": theme_id,
-                        "nameLanguage": "ar",
-                        "isAdmin": is_admin,
-                    }
-        except Exception as e:
-            logger.info(f"Auth token optional fallback for pass generation: {e}")
-
-    # Fallback to payload (Guest / Unregistered)
-    theme_id = card_data.get("themeId", "gdg-blue")
-    if theme_id == "gdg-gold-admin":
+    is_admin = is_member_admin(member)
+    theme_id = profile.theme_id or card_data.get("themeId", "gdg-blue")
+    if theme_id == "gdg-gold-admin" and not is_admin:
         theme_id = "gdg-blue"
 
-    uuid_val = card_data.get("uuid")
-    if not uuid_val:
-        uuid_val = uuid_lib.uuid4().hex
+    effective_name = profile.custom_name or member.name
 
     return {
-        "uuid": uuid_val,
-        "fullName": card_data.get("fullName") or "عضو GDG",
-        "uniId": card_data.get("uniId", ""),
-        "email": card_data.get("email", ""),
-        "phone": card_data.get("phone", ""),
-        "uniCollege": card_data.get("institution") or card_data.get("uniCollege") or "جامعة القصيم",
-        "major": card_data.get("major") or "علوم حاسب",
-        "userStatus": card_data.get("userStatus", "student"),
-        "educationLevel": card_data.get("educationLevel", "university"),
-        "studyYearOrLevel": card_data.get("studyYearOrLevel", ""),
+        "uuid": profile.uuid,
+        "fullName": effective_name,
+        "uniId": member.uni_id,
+        "email": member.email or "",
+        "phone": member.phone_number or "",
+        "uniCollege": profile.institution or member.uni_college or "جامعة القصيم",
+        "major": profile.major or member.uni_college or "علوم حاسب",
+        "userStatus": profile.user_status or "student",
+        "educationLevel": profile.education_level or "university",
+        "studyYearOrLevel": profile.study_year_or_level or "",
         "themeId": theme_id,
         "nameLanguage": "ar",
-        "isAdmin": False,
+        "isAdmin": is_admin,
     }
 
 
@@ -177,84 +105,58 @@ def _resolve_pass_card_data(request: Request, payload: Optional[Dict[str, Any]] 
 def get_wallet_me(credentials=Depends(authenticated_guard)):
     """
     Returns the authenticated member's core info, role permissions, and MemberProfiles settings.
+
+    Resolves the caller through the same ``resolve_member`` identity path as
+    ``/members/me`` - by now onboarding has already created their ``Members``
+    row, so a 404 here means something upstream is broken, not a normal case
+    to paper over with fabricated data.
     """
     with SessionLocal() as session:
-        try:
-            member = _resolve_authenticated_member(session, credentials)
-            profile = get_or_create_member_profile(session, member.id)
-            session.commit()
+        member = resolve_member(session, credentials)
+        profile = get_or_create_member_profile(session, member.id)
+        session.commit()
 
-            is_admin = is_member_admin(member)
-            role_names = [r.role.value for r in member.role] if member.role else []
+        is_admin = is_member_admin(member)
+        role_names = [r.role.value for r in member.role] if member.role else []
 
-            effective_name = profile.custom_name or member.name
-            effective_institution = profile.institution or member.uni_college or "جامعة القصيم"
-            effective_major = profile.major or member.uni_college or "علوم حاسب"
-            effective_level = profile.study_year_or_level or (
-                f"المستوى {member.uni_level}" if member.uni_level else "عضو مجتمع GDG"
-            )
+        effective_name = profile.custom_name or member.name
+        effective_institution = profile.institution or member.uni_college or "جامعة القصيم"
+        effective_major = profile.major or member.uni_college or "علوم حاسب"
+        effective_level = profile.study_year_or_level or (
+            f"المستوى {member.uni_level}" if member.uni_level else "عضو مجتمع GDG"
+        )
 
-            return {
-                "member_id": member.id,
-                "name": effective_name,
-                "official_name": member.name,
+        return {
+            "member_id": member.id,
+            "name": effective_name,
+            "official_name": member.name,
+            "custom_name": profile.custom_name,
+            "uni_id": member.uni_id,
+            "email": member.email,
+            "phone_number": member.phone_number,
+            "gender": member.gender.value if hasattr(member.gender, "value") else str(member.gender),
+            "uni_level": member.uni_level,
+            "uni_college": member.uni_college,
+            "is_admin": is_admin,
+            "roles": role_names,
+            "profile": {
+                "uuid": profile.uuid,
                 "custom_name": profile.custom_name,
-                "uni_id": member.uni_id,
-                "email": member.email,
-                "phone_number": member.phone_number,
-                "gender": member.gender.value if hasattr(member.gender, "value") else str(member.gender),
-                "uni_level": member.uni_level,
-                "uni_college": member.uni_college,
-                "is_admin": is_admin,
-                "roles": role_names,
-                "profile": {
-                    "uuid": profile.uuid,
-                    "custom_name": profile.custom_name,
-                    "theme_id": profile.theme_id,
-                    "name_language": "ar",
-                    "user_status": profile.user_status or "student",
-                    "education_level": profile.education_level or "university",
-                    "institution": effective_institution,
-                    "major": effective_major,
-                    "study_year_or_level": effective_level,
-                    "bio": profile.bio or "",
-                    "social_links": profile.social_links or [],
-                    "visibility": profile.visibility
-                    or {"showPhone": False, "showEmail": False, "showAcademic": True, "showBio": True},
-                    "created_at": profile.created_at.isoformat() if profile.created_at else None,
-                    "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
-                },
-            }
-        except HTTPException:
-            decoded = credentials.model_dump().get("decoded", {})
-            return {
-                "member_id": None,
-                "name": decoded.get("name") or "",
-                "official_name": "",
-                "custom_name": None,
-                "uni_id": decoded.get("metadata", {}).get("uni_id"),
-                "email": decoded.get("email") or "",
-                "phone_number": None,
-                "gender": None,
-                "uni_level": None,
-                "uni_college": None,
-                "is_admin": False,
-                "roles": [],
-                "profile": {
-                    "uuid": None,
-                    "custom_name": None,
-                    "theme_id": "gdg-blue",
-                    "name_language": "ar",
-                    "user_status": "student",
-                    "education_level": "university",
-                    "institution": "جامعة القصيم",
-                    "major": "علوم حاسب",
-                    "study_year_or_level": "",
-                    "bio": "",
-                    "social_links": [],
-                    "visibility": {"showPhone": False, "showEmail": False, "showAcademic": True, "showBio": True},
-                },
-            }
+                "theme_id": profile.theme_id,
+                "name_language": "ar",
+                "user_status": profile.user_status or "student",
+                "education_level": profile.education_level or "university",
+                "institution": effective_institution,
+                "major": effective_major,
+                "study_year_or_level": effective_level,
+                "bio": profile.bio or "",
+                "social_links": profile.social_links or [],
+                "visibility": profile.visibility
+                or {"showPhone": False, "showEmail": False, "showAcademic": True, "showBio": True},
+                "created_at": profile.created_at.isoformat() if profile.created_at else None,
+                "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
+            },
+        }
 
 
 @router.put("/me", summary="Update member wallet profile settings")
@@ -265,7 +167,7 @@ def update_wallet_me(payload: UpdateWalletMePayload, credentials=Depends(authent
     Enforces server-side admin role check if gold card (gdg-gold-admin) is requested.
     """
     with SessionLocal() as session:
-        member = _resolve_authenticated_member(session, credentials)
+        member = resolve_member(session, credentials)
         is_admin = is_member_admin(member)
 
         # Check theme authorization
@@ -281,6 +183,12 @@ def update_wallet_me(payload: UpdateWalletMePayload, credentials=Depends(authent
         visibility_dict = payload.visibility.model_dump() if payload.visibility is not None else None
 
         if payload.email is not None:
+            existing_by_email = member_queries.get_member_by_email_or_none(session, str(payload.email))
+            if existing_by_email and existing_by_email.id != member.id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Member with email {payload.email} already exists",
+                )
             member.email = str(payload.email)
         if payload.phone_number is not None:
             member.phone_number = payload.phone_number.strip() or None
@@ -329,13 +237,17 @@ def update_wallet_me(payload: UpdateWalletMePayload, credentials=Depends(authent
         }
 
 
-@router.post("/apple-pass", summary="Generate signed Apple Wallet (.pkpass) for member or guest")
-def create_apple_wallet_pass(request: Request, payload: Annotated[Optional[Dict[str, Any]], Body()] = None):
+@router.post("/apple-pass", summary="Generate signed Apple Wallet (.pkpass) for the authenticated member")
+def create_apple_wallet_pass(
+    payload: Annotated[Optional[Dict[str, Any]], Body()] = None, credentials=Depends(authenticated_guard)
+):
     """
-    Generates and signs an official Apple Wallet .pkpass file.
-    Supports authenticated members (loading DB record) and guest cards without 401 failures.
+    Generates and signs an official Apple Wallet .pkpass file for the authenticated,
+    DB-registered member. There is no guest/anonymous pass path - a wallet pass
+    always represents a real member row.
     """
-    card_data = _resolve_pass_card_data(request, payload)
+    with SessionLocal() as session:
+        card_data = _resolve_pass_card_data(session, credentials, payload)
     pkpass_bytes = generate_apple_pkpass(card_data)
     file_name = f"gdg-pass-{card_data['uuid'][:8]}.pkpass"
 
@@ -349,13 +261,15 @@ def create_apple_wallet_pass(request: Request, payload: Annotated[Optional[Dict[
     )
 
 
-@router.post("/google-pass", summary="Generate signed Google Wallet save link for member or guest")
-def create_google_wallet_pass(request: Request, payload: Annotated[Optional[Dict[str, Any]], Body()] = None):
+@router.post("/google-pass", summary="Generate signed Google Wallet save link for the authenticated member")
+def create_google_wallet_pass(
+    payload: Annotated[Optional[Dict[str, Any]], Body()] = None, credentials=Depends(authenticated_guard)
+):
     """
-    Generates a signed Google Wallet save URL.
-    Supports authenticated members and guest cards.
+    Generates a signed Google Wallet save URL for the authenticated, DB-registered member.
     """
-    card_data = _resolve_pass_card_data(request, payload)
+    with SessionLocal() as session:
+        card_data = _resolve_pass_card_data(session, credentials, payload)
     try:
         save_url = generate_google_wallet_pass_url(card_data)
     except ValueError as exc:
