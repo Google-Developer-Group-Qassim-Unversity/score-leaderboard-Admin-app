@@ -1,0 +1,83 @@
+name: Deploy Admin Frontend
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Deploy using ssh
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.INFISICAL_VPS_HOST }}
+        username: ${{ secrets.INFISICAL_VPS_USER }}
+        key: ${{ secrets.INFISICAL_GITHUB_SSH_PRIVATE_KEY }}
+        port: 22
+        script: |
+          set -e
+          export PATH="$HOME/.local/bin:$PATH"
+
+          echo "Running Deployment commands...🚀"
+          NAME="GDG-admin-frontend"
+          TARGET_DIR=~/$NAME
+          BRANCH=main
+          REPO_URL="https://github.com/Google-Developer-Group-Qassim-Unversity/score-leaderboard-Admin-app.git"
+
+          INFISICAL_ENV="prod"
+          INFISICAL_ENV_PATH="/admin-frontend"
+          INFISICAL_PROJECT_ID="300b1e97-7e52-4a4e-872d-053b9082cac5"
+
+          echo "Cloning repository..."
+          rm -rf "$TARGET_DIR"
+          git clone --branch "$BRANCH" "$REPO_URL" "$TARGET_DIR"
+          shopt -s dotglob
+          rm -rf "$TARGET_DIR/Backend"
+          mv "$TARGET_DIR"/Frontend/* "$TARGET_DIR"/
+          rm -rf "$TARGET_DIR/Frontend"
+          shopt -u dotglob
+          echo "Clone complete ✅."
+          echo "==============================="
+
+          echo "🔑 Infisical CLI..."
+          cd "$TARGET_DIR"
+          if ! command -v infisical >/dev/null 2>&1; then
+              echo "Installing Infisical CLI..."
+              curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | sudo -E bash
+              sudo apt-get update -qq
+              sudo apt-get install -y infisical
+          else
+              echo "Found Infisical at $(command -v infisical)"
+          fi
+
+          echo "🥷 logging in to Infisical (machine identity)..."
+          source /etc/infisical/prod.env
+          INFISICAL_TOKEN="$(
+            infisical login \
+              --method=$INFISICAL_AUTH_METHOD \
+              --client-id="$INFISICAL_UNIVERSAL_AUTH_CLIENT_ID" \
+              --client-secret="$INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET" \
+              --plain --silent
+          )"
+          export INFISICAL_TOKEN
+
+          echo "📄 exporting secrets to .env.production..."
+          infisical export \
+            --env=$INFISICAL_ENV \
+            --path="$INFISICAL_ENV_PATH" \
+            --projectId=$INFISICAL_PROJECT_ID \
+            --format=dotenv \
+            --output-file="$TARGET_DIR/.env.production"
+
+          echo "🐳 building image..."
+          docker compose -f docker-compose.production.yml --env-file .env.production build
+
+          echo "🚀 starting container..."
+          docker compose -f docker-compose.production.yml --env-file .env.production up -d
+
+          echo "🧹 pruning dangling images..."
+          docker image prune -f
+
+          echo "Deployment Complete ✅."
+          echo "https://admin.gdg-q.com"
