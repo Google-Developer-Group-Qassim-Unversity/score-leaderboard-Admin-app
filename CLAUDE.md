@@ -9,18 +9,16 @@ SQLAlchemy + Alembic on MySQL; `Frontend/` is Next.js with Clerk auth.
 where the logs are, how to trace a single request end to end, and when to use
 Sentry instead of SSH.
 
-The short version: the backend runs under PM2 as `GDG-backend` on the VPS
-(`ssh oracle2`), logs to stdout, and every line carries the worker pid and a
-request id:
+The short version: the backend runs under PM2 as `GDG-backend` on a VPS, logs to
+stdout, and every line carries the worker pid and a request id:
 
 ```
 INFO [pid:1996265] [req:6cefc82ee87c] app.middleware: GET /health -> 200 in 3.9ms
 ```
 
-```bash
-ssh oracle2 'pm2 logs GDG-backend --lines 200'
-ssh oracle2 'grep "req:<id>" ~/.pm2/logs/GDG-backend-*.log'
-```
+SSH host, user and key live in Infisical under `prod` / `/VPS` - the runbook has
+a copy-pasteable helper that loads them without writing anything to disk, and
+handles the fact that `pm2` is not on the default non-interactive PATH.
 
 Every response carries that id in the `X-Request-ID` header, and it is set as a
 Sentry tag, so a Sentry issue links straight to its log lines.
