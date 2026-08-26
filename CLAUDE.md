@@ -37,7 +37,7 @@ These are enforced by tests, not just preference:
 - **Auth** is a dependency, not a parameter. Use
   `dependencies=[Depends(admin_guard)]` on the route or router when the handler
   does not need the token, and `member: CurrentMember` when it needs the caller.
-  `tests/test_route_auth.py` pins the guard on all 100 routes and fails if one
+  `tests/test_route_auth.py` pins the guard on all 103 routes and fails if one
   changes.
 - **Every route declares a `response_model`.** `response_model` silently drops
   undeclared keys, and the leaderboard app (a separate repository) consumes
@@ -57,8 +57,9 @@ uv run pyright .
 uv run poe dev                # runs via infisical, port 7001
 ```
 
-An in-progress refactor and its rationale are documented in
-[Backend/docs/fastapi-refactor-plan.md](Backend/docs/fastapi-refactor-plan.md).
+The conventions above came out of a FastAPI-idioms refactor; see
+[Backend/docs/FASTAPI_REFACTOR.md](Backend/docs/FASTAPI_REFACTOR.md) for what
+changed, the numbers, and what was deliberately left alone.
 
 > This file is intentionally short and covers only what is easy to get wrong.
 > Run `/init` if you want a fuller codebase overview generated.
