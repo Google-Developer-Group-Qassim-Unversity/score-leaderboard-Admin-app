@@ -1,10 +1,16 @@
+import logging
+from contextlib import asynccontextmanager
+
 import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
-from sqlalchemy.exc import OperationalError, TimeoutError as SQLAlchemyTimeoutError
-from starlette.requests import Request
+from fastapi.responses import RedirectResponse
+from app.clients import close_http_client, open_http_client
 from app.config import config
+from app.DB.main import get_engine
+from app.error_handlers import register_exception_handlers
+from app.logging_config import configure_logging
+from app.middleware import RequestContextMiddleware
 from app.routers import (
     attendance,
     emails,
@@ -28,25 +34,41 @@ sentry_sdk.init(
     dsn=config.SENTRY_DSN, environment="development" if config.is_dev else "production", traces_sample_rate=0.2
 )
 
-app = FastAPI()
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    configure_logging()
+    # Touch the settings the app cannot serve a single request without, so a
+    # missing one is a failed boot rather than a 500 on whichever endpoint
+    # happens to need it first. The rest stay lazy: an instance with no R2 or
+    # Google Wallet credentials should still start and serve everything else.
+    config.DATABASE_URL
+    config.CLERK_GUARD
+    await open_http_client()
+    logger.info("Startup complete")
+
+    yield
+
+    await close_http_client()
+
+    # get_engine is lru_cached; calling it here when nothing ever built an
+    # engine would create one purely to throw it away.
+    if get_engine.cache_info().currsize:
+        get_engine().dispose()
+        logger.info("Database engine disposed")
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"]
 )
+app.add_middleware(RequestContextMiddleware)
 
 
-@app.exception_handler(OperationalError)
-def database_operational_error_handler(request: Request, exc: OperationalError):
-    print(f"OperationalError: {str(exc)}...")  # Log the error message for debugging
-    sentry_sdk.capture_exception(exc)
-    return JSONResponse(status_code=503, content={"detail": "Database temporarily unavailable. Please retry shortly."})
-
-
-@app.exception_handler(SQLAlchemyTimeoutError)
-def database_timeout_error_handler(request: Request, exc: SQLAlchemyTimeoutError):
-    print(f"TimeoutError: {str(exc)}...")  # Log the error message for debugging
-    sentry_sdk.capture_exception(exc)
-    return JSONResponse(status_code=503, content={"detail": "Database is under heavy load. Please retry shortly."})
+register_exception_handlers(app)
 
 
 @app.get("/", include_in_schema=False)
@@ -54,19 +76,19 @@ def root():
     return RedirectResponse(url="/docs")
 
 
-app.include_router(health.router, prefix="/health", tags=["health"])
-app.include_router(members.router, prefix="/members", tags=["members"])
-app.include_router(events.router, prefix="/events", tags=["events"])
-app.include_router(points.router, prefix="/points", tags=["Points"])
-app.include_router(semesters.router, prefix="/semesters", tags=["Semesters"])
-app.include_router(attendance.router, prefix="/attendance", tags=["Attendance"])
-app.include_router(emails.router, prefix="/emails", tags=["emails"])
-app.include_router(departments.router, prefix="/departments", tags=["departments"])
-app.include_router(action.router, prefix="/actions", tags=["actions"])
-app.include_router(custom.router, prefix="/custom", tags=["custom"])
-app.include_router(forms.router, prefix="/forms", tags=["Forms"])
-app.include_router(submissions.router, prefix="/submissions", tags=["Submissions"])
-app.include_router(submissions_manual.router, prefix="/submissions_manual", tags=["Submissions Manual"])
-app.include_router(upload.router, prefix="/upload", tags=["upload"])
-app.include_router(cache.router, prefix="/cache", tags=["cache"])
-app.include_router(wallet.router, prefix="/wallet", tags=["wallet"])
+app.include_router(health.router)
+app.include_router(members.router)
+app.include_router(events.router)
+app.include_router(points.router)
+app.include_router(semesters.router)
+app.include_router(attendance.router)
+app.include_router(emails.router)
+app.include_router(departments.router)
+app.include_router(action.router)
+app.include_router(custom.router)
+app.include_router(forms.router)
+app.include_router(submissions.router)
+app.include_router(submissions_manual.router)
+app.include_router(upload.router)
+app.include_router(cache.router)
+app.include_router(wallet.router)

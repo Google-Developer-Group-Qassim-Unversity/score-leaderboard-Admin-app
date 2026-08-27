@@ -1,6 +1,9 @@
+import logging
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from typing import Annotated
 from app.config import config
+from app.dependencies import DB
 from app.routers.models import Member_model
 from app.DB.schema import Members
 from app.DB import members as member_queries
@@ -8,6 +11,8 @@ from app.exceptions import MemberNotFound
 from json import dumps
 import jwt
 from datetime import datetime, date, timedelta
+
+logger = logging.getLogger(__name__)
 
 
 def get_effective_date(dt: datetime, threshold: int) -> date:
@@ -109,28 +114,38 @@ def optional_clerk_guard(credentials=Depends(config.CLERK_GUARD_optional)):
 
 
 def admin_guard(credentials=Depends(config.CLERK_GUARD)):
-    print("🔒 User authenticated, checking admin privileges...")
     if not is_admin(credentials):
         metadata = credentials.model_dump().get("decoded", {}).get("metadata", {})
-        print(f"🚫 Access Denied! User Metadata: {metadata}")
+        logger.warning("Access denied, user metadata: %s", metadata)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
     return credentials
 
 
 def admin_points_guard(credentials=Depends(config.CLERK_GUARD)):
-    print("🔒 User authenticated, checking admin_points privileges...")
     if not is_admin_points(credentials):
         metadata = credentials.model_dump().get("decoded", {}).get("metadata", {})
-        print(f"🚫 Access Denied! User Metadata: {metadata}")
+        logger.warning("Access denied, user metadata: %s", metadata)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin Points privileges required")
     return credentials
 
 
 def super_admin_guard(credentials=Depends(config.CLERK_GUARD)):
-    print("🔒 User authenticated, checking super 🦸‍♂ admin privileges...")
     if not is_super_admin(credentials):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
     return credentials
+
+
+def get_current_member(session: DB, credentials=Depends(authenticated_guard)) -> Members:
+    """The ``Members`` row for the authenticated caller.
+
+    Wraps the ``authenticated_guard`` + ``resolve_member`` pair that a route
+    would otherwise repeat by hand. Like ``resolve_member`` it only flushes the
+    ``clerk_user_id`` self-heal; a route that wants it persisted still commits.
+    """
+    return resolve_member(session, credentials)
+
+
+CurrentMember = Annotated[Members, Depends(get_current_member)]
 
 
 def credentials_to_member_model(credentials) -> Member_model:
@@ -158,7 +173,7 @@ def credentials_to_member_model(credentials) -> Member_model:
     credentials_dict = credentials.model_dump()
     credentials_str = dumps(credentials.model_dump(), ensure_ascii=False, indent=4)
     if not credentials_dict["decoded"]["metadata"]:
-        print(f"Invalid credentials structure:\n{credentials_str}")
+        logger.error("Invalid credentials structure: %s", credentials_str)
         raise ValueError("Invalid credentials: 'decoded' or 'metadata' missing")
 
     # 2. create Member_model from metadata

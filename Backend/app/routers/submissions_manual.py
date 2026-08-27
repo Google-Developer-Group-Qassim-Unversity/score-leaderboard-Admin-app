@@ -1,32 +1,33 @@
-from fastapi import APIRouter, HTTPException, Query, status
+import logging
+from fastapi import Depends, APIRouter, Query, status
 
-from app.DB.main import SessionLocal
+from app.DB.main import db_session
+from app.helpers import admin_guard
 from app.DB import submissions as submission_queries, members as member_queries
-from app.routers.logging import (
-    LogFile,
-    write_log_to,
-    write_log_traceback_to,
-    write_log_exception_to,
-    write_log_title_to,
-)
 
 # Reuse Google Forms helpers from the existing submissions router
 from app.routers.submissions import fetch_form_responses, extract_email_answer, sync_form_submissions
 from typing import Annotated
 
-router = APIRouter()
+from app.routers.responses import ManualSyncResponse
 
 
-def sync_manual_form_submissions(google_form_id: str, limit: int, log_file):
+logger = logging.getLogger(__name__)
+
+
+router = APIRouter(prefix="/submissions_manual", tags=["Submissions Manual"])
+
+
+def sync_manual_form_submissions(google_form_id: str, limit: int):
     """
     differs from the scheduled job in that it creates new submissions instead of updating partial ones
     """
     try:
-        write_log_title_to(log_file, f"Manual sync submissions for google_form_id: {google_form_id} (limit={limit})")
+        logger.info(f"Manual sync submissions for google_form_id: {google_form_id} (limit={limit})")
 
-        fetch_result = fetch_form_responses(google_form_id, log_file)
+        fetch_result = fetch_form_responses(google_form_id)
         if fetch_result is None:
-            write_log_to(log_file, "ERROR: Failed to fetch form responses")
+            logger.info("ERROR: Failed to fetch form responses")
             return {
                 "created": 0,
                 "skipped_existing": 0,
@@ -45,7 +46,7 @@ def sync_manual_form_submissions(google_form_id: str, limit: int, log_file):
         skipped_missing_email = 0
         processed = 0
 
-        with SessionLocal() as session:
+        with db_session() as session:
             for response in google_responses[:limit]:
                 processed += 1
 
@@ -80,15 +81,15 @@ def sync_manual_form_submissions(google_form_id: str, limit: int, log_file):
 
             session.commit()
 
-        write_log_to(log_file, "=== Manual Sync Summary ===")
-        write_log_to(log_file, f"google_form_id: {google_form_id}")
-        write_log_to(log_file, f"form_id: {form_id}")
-        write_log_to(log_file, f"total_fetched: {len(google_responses)}")
-        write_log_to(log_file, f"processed: {processed}")
-        write_log_to(log_file, f"created: {created}")
-        write_log_to(log_file, f"skipped_existing: {skipped_existing}")
-        write_log_to(log_file, f"skipped_no_member: {skipped_no_member}")
-        write_log_to(log_file, f"skipped_missing_email: {skipped_missing_email}")
+        logger.info("=== Manual Sync Summary ===")
+        logger.info(f"google_form_id: {google_form_id}")
+        logger.info(f"form_id: {form_id}")
+        logger.info(f"total_fetched: {len(google_responses)}")
+        logger.info(f"processed: {processed}")
+        logger.info(f"created: {created}")
+        logger.info(f"skipped_existing: {skipped_existing}")
+        logger.info(f"skipped_no_member: {skipped_no_member}")
+        logger.info(f"skipped_missing_email: {skipped_missing_email}")
 
         return {
             "created": created,
@@ -101,32 +102,24 @@ def sync_manual_form_submissions(google_form_id: str, limit: int, log_file):
         }
 
     except Exception as e:
-        write_log_exception_to(log_file, e)
-        write_log_traceback_to(log_file)
+        logger.exception(e)
         raise
 
 
-@router.post("/google/{google_form_id}", status_code=status.HTTP_200_OK)
+@router.post(
+    "/google/{google_form_id}",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(admin_guard)],
+    response_model=ManualSyncResponse,
+)
 def manual_create_google_submissions(google_form_id: str, limit: Annotated[int, Query(ge=1, le=2000)] = 50):
     """
     Public (no-auth) endpoint to manually sync Google Form responses into DB submissions.
     Processes only the first `limit` responses as returned by the Google API.
     """
-    with LogFile("manual google submissions sync") as log:
-        try:
-            return sync_manual_form_submissions(google_form_id, limit, log.file)
-        except Exception:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An error occurred while syncing submissions"
-            )
+    return sync_manual_form_submissions(google_form_id, limit)
 
 
-@router.post("/google/run/{google_form_id}", status_code=status.HTTP_200_OK)
+@router.post("/google/run/{google_form_id}", status_code=status.HTTP_200_OK, dependencies=[Depends(admin_guard)])
 def manual_run_google_form_submissions(google_form_id: str):
-    with LogFile("manual google submissions sync") as log:
-        try:
-            return sync_form_submissions(google_form_id, log.file)
-        except Exception:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An error occurred while syncing submissions"
-            )
+    return sync_form_submissions(google_form_id)

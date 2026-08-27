@@ -1,10 +1,13 @@
+import logging
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select, func
-from app.DB.schema import Actions, Members, MembersLogs, Logs, Events, Role, RoleType
-from app.exceptions import MemberNotFound
+from app.DB.schema import Members, MembersLogs, Role, RoleType
+from app.exceptions import DataIntegrityError, MemberNotFound
 from app.routers.models import Member_model
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 def create_member(session: Session, member: Member_model, is_authenticated: bool = False):
@@ -27,7 +30,7 @@ def create_member(session: Session, member: Member_model, is_authenticated: bool
             session.flush()
         return new_member
     except IntegrityError as e:
-        print(f"IntegrityError in create_member: {str(e)[:50]}...")
+        logger.warning("IntegrityError in create_member: %s", e)
         return None
 
 
@@ -115,10 +118,13 @@ def get_member_by_clerk_user_id_or_none(session: Session, clerk_user_id: str) ->
 
 
 def update_member(session: Session, member: Member_model, is_authenticated: bool):
+    if member.id is None:
+        # update_member always identifies its target by id; the one caller
+        # (create_member_if_not_exists) sets it right before calling this.
+        raise MemberNotFound("unknown")
     existing_member = session.scalar(select(Members).where(Members.id == member.id))
     if not existing_member:
         raise MemberNotFound(member.id)
-    print(f"Updating member: {existing_member.name}")
     existing_member.name = member.name
     existing_member.email = member.email
     existing_member.phone_number = member.phone_number
@@ -132,7 +138,7 @@ def update_member(session: Session, member: Member_model, is_authenticated: bool
     existing_member.updated_at = datetime.now()
     existing_member.is_authenticated = is_authenticated
     session.flush()
-    print(f"Updated member: {existing_member.name}")
+    logger.info("Updated member %s", existing_member.id)
     return existing_member
 
 
@@ -193,6 +199,10 @@ def update_member_role(session: Session, member_id: int, new_role: RoleType):
         .filter(Members.id == member_id)
         .first()
     )
+    if result is None:
+        # Should be unreachable: existing_member was just confirmed to exist and
+        # the role row above was either updated or created and flushed.
+        raise DataIntegrityError(f"Member [{member_id}] has no role row immediately after one was assigned")
 
     return result._asdict()
 

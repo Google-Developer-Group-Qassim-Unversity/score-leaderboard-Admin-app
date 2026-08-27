@@ -26,6 +26,7 @@ Defaults to a dry run (prints the plan, no writes). Pass --apply to commit.
 import argparse
 import sys
 import time
+from typing import cast
 from pathlib import Path
 
 script_dir = Path(__file__).resolve().parent
@@ -42,7 +43,7 @@ from _clerk_backfill_common import (
     derive_uni_email,
     fetch_all_clerk_users,
 )
-from app.DB.main import SessionLocal
+from app.DB.main import db_session
 from app.DB.schema import Members
 
 CREATE_DELAY_SECONDS = 0.3
@@ -56,7 +57,7 @@ def main(apply: bool):
     email_map = build_email_to_user_ids(users)
     print(f"Fetched {len(users)} Clerk users.")
 
-    with SessionLocal() as session:
+    with db_session() as session:
         members = session.scalars(
             select(Members).where(
                 Members.is_authenticated == 1,
@@ -75,7 +76,8 @@ def main(apply: bool):
         clerk_users_by_id = {user["id"]: user for user in users}
 
         for member in members:
-            personal_email = member.email.strip().lower()
+            # the query above filters to Members.email.isnot(None) and != ""
+            personal_email = cast(str, member.email).strip().lower()
             uni_email = derive_uni_email(member.uni_id) if member.uni_id else None
 
             if not personal_email or personal_email == uni_email:
