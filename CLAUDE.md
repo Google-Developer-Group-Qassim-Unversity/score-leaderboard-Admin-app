@@ -47,6 +47,16 @@ These are enforced by tests, not just preference:
   `logger = logging.getLogger(__name__)`. `print()`, `write_log` and `LogFile`
   are banned and the test suite fails if they reappear.
 
+## Action IDs are hardcoded
+
+`app/DB/logs.py` and `app/routers/action.py` reference production `actions`
+primary keys as literal lists. They decide which events can be created and
+which can be attended, they have already drifted apart, and they are wrong in
+every database that is not production - which is why the attendance tests
+patch the lookup out. Read
+[Backend/docs/HARDCODED_ACTION_IDS.md](Backend/docs/HARDCODED_ACTION_IDS.md)
+before changing anything in that area; it has the fix plan and a checklist.
+
 ## Commands
 
 ```bash
