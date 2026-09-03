@@ -63,9 +63,16 @@ before changing anything in that area; it has the fix plan and a checklist.
 cd Backend
 uv run pytest                 # needs docker (testcontainers) or DATABASE_URL
 uv run ruff check --fix .
+uv run ruff format .
 uv run pyright .
 uv run poe dev                # runs via infisical, port 7001
 ```
+
+CI runs `ruff format --check` as its own job, separate from `ruff check`. Run
+`uv run ruff format .` before every commit that touches `Backend/` - `ruff
+check --fix` does not rewrite formatting (line wraps, collapsing short
+dicts/calls onto one line), so a change that only shortens or lengthens a
+string can flip the format check even when `ruff check` is clean.
 
 The conventions above came out of a FastAPI-idioms refactor; see
 [Backend/docs/FASTAPI_REFACTOR.md](Backend/docs/FASTAPI_REFACTOR.md) for what
