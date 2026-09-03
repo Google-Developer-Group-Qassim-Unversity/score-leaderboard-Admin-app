@@ -2,34 +2,35 @@
 
 import * as React from "react";
 import { useTranslations } from "next-intl";
-import { Building2, Globe } from "lucide-react";
+import { UserCheck, Users } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
-interface LocationToggleProps {
-  value: "on-site" | "online";
-  onChange: (value: "on-site" | "online") => void;
+interface RegistrationToggleProps {
+  /** true = members must register before attending; false = open to everyone */
+  value: boolean;
+  onChange: (value: boolean) => void;
   disabled?: boolean;
   className?: string;
 }
 
-export function LocationToggle({
+export function RegistrationToggle({
   value,
   onChange,
   disabled = false,
   className,
-}: LocationToggleProps) {
-  const t = useTranslations("locationToggle");
+}: RegistrationToggleProps) {
+  const t = useTranslations("registrationToggle");
 
   return (
     <ToggleGroup
       type="single"
-      value={value}
+      value={value ? "required" : "open"}
       onValueChange={(val) => {
         // Prevent deselection - always must have one selected
         if (val) {
-          onChange(val as "on-site" | "online");
+          onChange(val === "required");
         }
       }}
       disabled={disabled}
@@ -37,20 +38,20 @@ export function LocationToggle({
       className={cn("justify-start", className)}
     >
       <ToggleGroupItem
-        value="on-site"
-        aria-label={t("onsiteAria")}
+        value="required"
+        aria-label={t("requiredAria")}
         className="flex items-center gap-2"
       >
-        <Building2 className="h-4 w-4" />
-        {t("onsite")}
+        <UserCheck className="h-4 w-4" />
+        {t("required")}
       </ToggleGroupItem>
       <ToggleGroupItem
-        value="online"
-        aria-label={t("remoteAria")}
+        value="open"
+        aria-label={t("openAria")}
         className="flex items-center gap-2"
       >
-        <Globe className="h-4 w-4" />
-        {t("remote")}
+        <Users className="h-4 w-4" />
+        {t("open")}
       </ToggleGroupItem>
     </ToggleGroup>
   );
