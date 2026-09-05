@@ -57,6 +57,24 @@ patch the lookup out. Read
 [Backend/docs/HARDCODED_ACTION_IDS.md](Backend/docs/HARDCODED_ACTION_IDS.md)
 before changing anything in that area; it has the fix plan and a checklist.
 
+## Frontend: the API layer is mid-migration
+
+`Frontend/lib/api/` is the API as one module - `useApi()` in a client
+component, `serverApi()` in a route handler - and it holds the Clerk token
+itself. `Frontend/lib/api.ts` is the older half: 59 one-line wrappers that each
+take an optional `getToken`, which callers thread down through hooks and
+component props.
+
+**The invariant: anything still taking `getToken` is on a resource that has not
+migrated.** Threading it into a new hook or a new prop is the mistake to catch
+in review; migrate the resource instead. `lib/api.ts`'s header comment lists
+what has moved and the three steps for moving the next one.
+
+The migrated calls throw `ApiRequestError` rather than returning
+`ApiResponse<T>`, so there is one `ApiRequestError` class and `lib/api.ts`
+re-exports it - defining a second would break the `instanceof` check that stops
+react-query retrying 404s.
+
 ## Commands
 
 ```bash
@@ -66,6 +84,11 @@ uv run ruff check --fix .
 uv run ruff format .
 uv run pyright .
 uv run poe dev                # runs via infisical, port 7001
+
+cd Frontend
+pnpm run typecheck            # tsc --noEmit; the only safety net, there are no tests
+pnpm run lint
+pnpm run dev                  # runs via infisical, port 3000
 ```
 
 CI runs `ruff format --check` as its own job, separate from `ruff check`. Run
