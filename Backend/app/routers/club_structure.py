@@ -22,6 +22,8 @@ from app.routers.club_structure_models import (
     ClubOverviewResponse,
     DepartmentCardResponse,
     PresidentSeatResponse,
+    PublicClubDepartmentResponse,
+    PublicClubStructureResponse,
     ReplaceAssignmentRequest,
     TenureHistoryResponse,
     UpdateDepartmentRequest,
@@ -43,6 +45,21 @@ def _management_actor(credentials: Annotated[HTTPAuthorizationCredentials, Depen
 ManagementActor = Annotated[str, Depends(_management_actor)]
 
 
+def _public_name(full_name: str) -> str:
+    """Limit public names to the first and final whitespace-delimited parts."""
+    parts = full_name.split()
+    if len(parts) <= 2:
+        return " ".join(parts)
+    family_name = parts[-2:] if parts[-1] == "الله" else parts[-1:]
+    return " ".join([parts[0], *family_name])
+
+
+def _is_board_department(department: Departments) -> bool:
+    english_name = department.name.strip().casefold()
+    arabic_name = department.ar_name.strip().replace("إ", "ا")
+    return "board" in english_name or "مجلس الادارة" in arabic_name
+
+
 def _get_department(session: Session, department_id: int) -> Departments:
     department = department_queries.get_department_by_id(session, department_id)
     if department is None:
@@ -50,17 +67,58 @@ def _get_department(session: Session, department_id: int) -> Departments:
     return department
 
 
-def _commit_department(session: Session, department: Departments) -> ClubDepartmentResponse:
-    session.refresh(department)
-    result = ClubDepartmentResponse.model_validate(department)
+def _commit_and_refresh(session: Session) -> None:
     session.commit()
-    # These fields affect existing cached public department/points responses.
     # Cache failure must not report an already committed write as unsuccessful.
     try:
         reset_leaderboard_cache()
     except Exception:
-        logger.warning("Could not refresh leaderboard cache after department %s changed", department.id, exc_info=True)
+        logger.warning("Could not refresh leaderboard cache after the club structure changed", exc_info=True)
+
+
+def _commit_department(session: Session, department: Departments) -> ClubDepartmentResponse:
+    session.refresh(department)
+    result = ClubDepartmentResponse.model_validate(department)
+    _commit_and_refresh(session)
     return result
+
+
+@router.get("/public", response_model=PublicClubStructureResponse)
+def get_public_club_structure(session: DB):
+    """Return display-only active structure data without admin or audit fields."""
+    rosters: dict[int, list] = {}
+    for assignment in queries.get_active_department_rosters(session):
+        rosters.setdefault(assignment.department_id, []).append(assignment)
+
+    departments = []
+    for department in department_queries.get_departments(session):
+        if not department.active:
+            continue
+        roster = rosters.get(department.id, [])
+        leader = next((_public_name(a.member.name) for a in roster if a.role == ClubAssignmentRole.LEADER), None)
+        deputy = next((_public_name(a.member.name) for a in roster if a.role == ClubAssignmentRole.DEPUTY), None)
+        members = [_public_name(a.member.name) for a in roster if a.role == ClubAssignmentRole.MEMBER]
+        if _is_board_department(department) and "جود الفرم" not in members:
+            members.append("جود الفرم")
+        departments.append(
+            PublicClubDepartmentResponse(
+                id=department.id,
+                name=department.name,
+                ar_name=department.ar_name,
+                type=department.type,
+                color=department.color,
+                icon=department.icon,
+                leadership_enabled=bool(department.leadership_enabled),
+                leader=leader,
+                deputy=deputy,
+                members=members,
+            )
+        )
+
+    return PublicClubStructureResponse(
+        presidents=[_public_name(assignment.member.name) for assignment in queries.get_presidents(session)],
+        departments=sorted(departments, key=lambda department: department.id),
+    )
 
 
 @router.get("", response_model=ClubOverviewResponse, dependencies=[Depends(admin_guard)])
@@ -171,7 +229,7 @@ def add_club_department_member(
 ):
     assignment = service.add_department_member(session, department_id, payload.member_id, changed_by=actor)
     result = ClubAssignmentResponse.model_validate(assignment)
-    session.commit()
+    _commit_and_refresh(session)
     return result
 
 
@@ -187,7 +245,7 @@ def remove_club_department_member(
         session, department_id, member_id, expected_assignment_id=expected_assignment_id, changed_by=actor
     )
     result = ClubAssignmentResponse.model_validate(assignment)
-    session.commit()
+    _commit_and_refresh(session)
     return result
 
 
@@ -208,7 +266,7 @@ def replace_club_department_leadership(
         changed_by=actor,
     )
     result = ClubAssignmentResponse.model_validate(assignment) if assignment is not None else None
-    session.commit()
+    _commit_and_refresh(session)
     return result
 
 
@@ -220,5 +278,5 @@ def replace_club_president(
         session, slot, payload.member_id, expected_assignment_id=payload.expected_assignment_id, changed_by=actor
     )
     result = ClubAssignmentResponse.model_validate(assignment) if assignment is not None else None
-    session.commit()
+    _commit_and_refresh(session)
     return result
