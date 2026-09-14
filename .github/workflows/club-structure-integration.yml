@@ -1,0 +1,52 @@
+name: Club Structure Integration
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "Backend/**"
+      - "Frontend/**"
+      - ".github/workflows/club-structure-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-api-mysql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.3.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: Frontend/pnpm-lock.yaml
+      - name: Install backend dependencies
+        working-directory: Backend
+        run: uv sync --locked
+      - name: Install frontend dependencies and Chromium
+        working-directory: Frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+      - name: Validate backend and browser integration against isolated MySQL
+        working-directory: Backend
+        env:
+          RUN_CLUB_BROWSER: "1"
+        run: uv run pytest --basetemp=/tmp/club-structure-tests
+      - name: Save browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: club-structure-browser
+          path: /tmp/club-structure-tests/**/*.png
+          if-no-files-found: ignore
