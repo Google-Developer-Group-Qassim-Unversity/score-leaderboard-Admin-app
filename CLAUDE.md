@@ -86,10 +86,15 @@ uv run pyright .
 uv run poe dev                # runs via infisical, port 7001
 
 cd Frontend
-pnpm run typecheck            # tsc --noEmit; the only safety net, there are no tests
+pnpm run typecheck            # tsc --noEmit
 pnpm run lint
 pnpm run dev                  # runs via infisical, port 3000
 ```
+
+Club Structure has an opt-in browser/API/MySQL check. After installing frontend
+dependencies and Playwright Chromium, run `RUN_CLUB_BROWSER=1 uv run pytest`
+from `Backend/` with Docker available and `DATABASE_URL` unset. See
+`Frontend/tests/club-structure/README.md` for setup and scope.
 
 CI runs `ruff format --check` as its own job, separate from `ruff check`. Run
 `uv run ruff format .` before every commit that touches `Backend/` - `ruff
