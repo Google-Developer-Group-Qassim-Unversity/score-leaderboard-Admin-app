@@ -1,0 +1,96 @@
+name: Deploy
+
+# On merge to main, deploys only the half that changed. Run it by hand to redeploy both.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Both deploys replace their directory on the VPS; queue merges instead of overlapping them.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.backend == 'true' }}
+      frontend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.frontend == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name == 'push'
+        with:
+          filters: |
+            backend: ["Backend/**", ".github/workflows/deploy.yml"]
+            frontend: ["Frontend/**", ".github/workflows/deploy.yml"]
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.INFISICAL_VPS_HOST }}
+          username: ${{ secrets.INFISICAL_VPS_USER }}
+          key: ${{ secrets.INFISICAL_GITHUB_SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            export PATH="$HOME/.local/bin:/home/ubuntu/.nvm/versions/node/v24.12.0/bin:$PATH"
+            NAME=GDG-backend
+            DIR=~/$NAME
+
+            TMP=$(mktemp -d)
+            git clone --depth 1 https://github.com/${{ github.repository }}.git "$TMP"
+            rm -rf "$DIR"
+            mv "$TMP/Backend" "$DIR"
+            rm -rf "$TMP"
+            cd "$DIR"
+
+            source /etc/infisical/prod.env
+            INFISICAL_TOKEN=$(infisical login --method="$INFISICAL_AUTH_METHOD" \
+              --client-id="$INFISICAL_UNIVERSAL_AUTH_CLIENT_ID" \
+              --client-secret="$INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET" --plain --silent)
+
+            uv sync
+            pm2 delete $NAME || true
+            pm2 start "INFISICAL_TOKEN=$INFISICAL_TOKEN infisical run --env=prod --path=/admin-backend --projectId=300b1e97-7e52-4a4e-872d-053b9082cac5 -- uv run uvicorn app.main:app --port 7501 --host 0.0.0.0 --workers 4" --name $NAME --time
+            pm2 save
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.INFISICAL_VPS_HOST }}
+          username: ${{ secrets.INFISICAL_VPS_USER }}
+          key: ${{ secrets.INFISICAL_GITHUB_SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            DIR=~/GDG-admin-frontend
+
+            TMP=$(mktemp -d)
+            git clone --depth 1 https://github.com/${{ github.repository }}.git "$TMP"
+            rm -rf "$DIR"
+            mv "$TMP/Frontend" "$DIR"
+            rm -rf "$TMP"
+            cd "$DIR"
+
+            source /etc/infisical/prod.env
+            INFISICAL_TOKEN=$(infisical login --method="$INFISICAL_AUTH_METHOD" \
+              --client-id="$INFISICAL_UNIVERSAL_AUTH_CLIENT_ID" \
+              --client-secret="$INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET" --plain --silent)
+            export INFISICAL_TOKEN
+            infisical export --env=prod --path=/admin-frontend --projectId=300b1e97-7e52-4a4e-872d-053b9082cac5 \
+              --format=dotenv --output-file=.env.production
+
+            docker compose -f docker-compose.production.yml --env-file .env.production up -d --build
+            docker image prune -f
