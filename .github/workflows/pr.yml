@@ -1,0 +1,129 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - "Backend/**"
+              - ".github/workflows/pr.yml"
+            frontend:
+              - "Frontend/**"
+              - ".github/workflows/pr.yml"
+
+  backend-lint:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  # The PR's migrations are applied on top of main's, so main's must already be
+  # applied to production - otherwise merging deploys code ahead of the schema.
+  production-migrations:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+      - run: uv sync --locked
+      - name: Check production DB is at main's head
+        env:
+          DATABASE_URL: ${{ secrets.INFISICAL_ALEMBIC_DATABASE_URL }}
+        run: uv run alembic check
+
+  frontend-lint:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.23.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: Frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+
+  # One pytest run covers the whole backend suite, the fresh-DB `alembic upgrade
+  # head` (conftest migrates the testcontainers MySQL), and the Club Structure
+  # browser check, which needs the frontend installed.
+  test:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.23.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: Frontend/pnpm-lock.yaml
+      - name: Install dependencies
+        run: |
+          (cd Backend && uv sync --locked)
+          (cd Frontend && pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium)
+      - name: Run pytest (with Club Structure browser check)
+        working-directory: Backend
+        env:
+          RUN_CLUB_BROWSER: "1"
+        run: uv run pytest --basetemp=/tmp/pytest
+      - name: Save browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: club-structure-browser
+          path: /tmp/pytest/**/*.png
+          if-no-files-found: ignore

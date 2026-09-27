@@ -1,0 +1,207 @@
+name: Deploy
+
+# Runs when a PR is merged to main and deploys only the half that changed.
+# Run it by hand (Actions -> Deploy -> Run workflow) to redeploy both.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Both deploys wipe and re-clone their directory on the VPS, so two merges in a
+# row must not overlap. Queue them instead of cancelling a deploy mid-way.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.backend == 'true' }}
+      frontend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.frontend == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name == 'push'
+        with:
+          filters: |
+            backend:
+              - "Backend/**"
+              - ".github/workflows/deploy.yml"
+            frontend:
+              - "Frontend/**"
+              - ".github/workflows/deploy.yml"
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy backend over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.INFISICAL_VPS_HOST }}
+          username: ${{ secrets.INFISICAL_VPS_USER }}
+          key: ${{ secrets.INFISICAL_GITHUB_SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            set -e
+            export PATH="$HOME/.local/bin:$PATH"
+
+            echo "Running Deployment commands...🚀"
+            NAME="GDG-backend"
+            TARGET_DIR=~/$NAME
+            BRANCH=main
+            REPO_URL="https://github.com/Google-Developer-Group-Qassim-Unversity/score-leaderboard-Admin-app.git"
+            PORT=7501
+            PM2_PATH="/home/ubuntu/.nvm/versions/node/v24.12.0/bin/"
+            export PATH="$PM2_PATH:$PATH"
+
+            INFISICAL_ENV="prod"
+            INFISICAL_ENV_PATH="/admin-backend"
+            INFISICAL_PROJECT_ID="300b1e97-7e52-4a4e-872d-053b9082cac5"
+
+            echo "Cloning new repository..."
+            rm -rf "$TARGET_DIR"
+            git clone --branch $BRANCH "$REPO_URL" "$TARGET_DIR"
+            rm -rf $TARGET_DIR/Frontend
+            mv $TARGET_DIR/Backend/* $TARGET_DIR
+            rm -rf $TARGET_DIR/Backend
+            echo "Deployment Complete ✅."
+            echo "==============================="
+
+            echo "Running Build commands...🚀"
+            cd "$TARGET_DIR"
+
+            if ! command -v infisical >/dev/null 2>&1; then
+                echo "🔑 Installing Infisical CLI..."
+                curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | sudo -E bash
+                sudo apt-get update -qq
+                sudo apt-get install -y infisical
+            else
+                echo "🔑 Found Infisical at $(command -v infisical)"
+            fi
+
+            echo "🥷 logging in to Infisical..."
+            source /etc/infisical/prod.env
+            INFISICAL_TOKEN="$(
+              infisical login \
+                --method=$INFISICAL_AUTH_METHOD \
+                --client-id="$INFISICAL_UNIVERSAL_AUTH_CLIENT_ID" \
+                --client-secret="$INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET" \
+                --plain --silent
+            )"
+            export INFISICAL_TOKEN
+
+            if ! command -v uv >/dev/null 2>&1; then
+                echo "☀️ Installing uv..."
+                curl -LsSf https://astral.sh/uv/install.sh | sh
+                source ~/.bashrc
+            else
+                echo "☀️ Found uv at $(command -v uv)"
+            fi
+
+            echo "📦 setting up virtual environment and installing dependencies..."
+            uv venv --clear -p python3.13 .venv
+            source .venv/bin/activate
+            uv sync
+
+            echo "Build Complete ✅."
+            echo "==============================="
+
+            echo "🚀 Starting application with pm2..."
+            if ! command -v pm2 >/dev/null 2>&1; then
+                echo "❗ PM2 not Found"
+                echo "install it with:  npm install pm2 -g"
+                exit 1
+            fi
+
+            echo "💾 creating proccess $NAME..."
+            pm2 delete $NAME || true
+            pm2 start "INFISICAL_TOKEN=$INFISICAL_TOKEN infisical run --env=$INFISICAL_ENV --path='$INFISICAL_ENV_PATH' --projectId=$INFISICAL_PROJECT_ID -- uv run uvicorn app.main:app --port $PORT --host 0.0.0.0 --workers 4" --name $NAME --time
+            pm2 save
+            echo "Application is running on port $PORT ✅."
+            echo "==============================="
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy admin frontend over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.INFISICAL_VPS_HOST }}
+          username: ${{ secrets.INFISICAL_VPS_USER }}
+          key: ${{ secrets.INFISICAL_GITHUB_SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            set -e
+            export PATH="$HOME/.local/bin:$PATH"
+
+            echo "Running Deployment commands...🚀"
+            NAME="GDG-admin-frontend"
+            TARGET_DIR=~/$NAME
+            BRANCH=main
+            REPO_URL="https://github.com/Google-Developer-Group-Qassim-Unversity/score-leaderboard-Admin-app.git"
+
+            INFISICAL_ENV="prod"
+            INFISICAL_ENV_PATH="/admin-frontend"
+            INFISICAL_PROJECT_ID="300b1e97-7e52-4a4e-872d-053b9082cac5"
+
+            echo "Cloning repository..."
+            rm -rf "$TARGET_DIR"
+            git clone --branch "$BRANCH" "$REPO_URL" "$TARGET_DIR"
+            shopt -s dotglob
+            rm -rf "$TARGET_DIR/Backend"
+            mv "$TARGET_DIR"/Frontend/* "$TARGET_DIR"/
+            rm -rf "$TARGET_DIR/Frontend"
+            shopt -u dotglob
+            echo "Clone complete ✅."
+            echo "==============================="
+
+            echo "🔑 Infisical CLI..."
+            cd "$TARGET_DIR"
+            if ! command -v infisical >/dev/null 2>&1; then
+                echo "Installing Infisical CLI..."
+                curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | sudo -E bash
+                sudo apt-get update -qq
+                sudo apt-get install -y infisical
+            else
+                echo "Found Infisical at $(command -v infisical)"
+            fi
+
+            echo "🥷 logging in to Infisical (machine identity)..."
+            source /etc/infisical/prod.env
+            INFISICAL_TOKEN="$(
+              infisical login \
+                --method=$INFISICAL_AUTH_METHOD \
+                --client-id="$INFISICAL_UNIVERSAL_AUTH_CLIENT_ID" \
+                --client-secret="$INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET" \
+                --plain --silent
+            )"
+            export INFISICAL_TOKEN
+
+            echo "📄 exporting secrets to .env.production..."
+            infisical export \
+              --env=$INFISICAL_ENV \
+              --path="$INFISICAL_ENV_PATH" \
+              --projectId=$INFISICAL_PROJECT_ID \
+              --format=dotenv \
+              --output-file="$TARGET_DIR/.env.production"
+
+            echo "🐳 building image..."
+            docker compose -f docker-compose.production.yml --env-file .env.production build
+
+            echo "🚀 starting container..."
+            docker compose -f docker-compose.production.yml --env-file .env.production up -d
+
+            echo "🧹 pruning dangling images..."
+            docker image prune -f
+
+            echo "Deployment Complete ✅."
+            echo "https://admin.gdg-q.com"
