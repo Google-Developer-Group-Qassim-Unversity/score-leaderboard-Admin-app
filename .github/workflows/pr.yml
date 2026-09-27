@@ -121,9 +121,8 @@ jobs:
           RUN_CLUB_BROWSER: "1"
         run: uv run pytest --basetemp=/tmp/pytest
       - name: Save browser screenshots
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: club-structure-browser
           path: /tmp/pytest/**/*.png
-          if-no-files-found: ignore
