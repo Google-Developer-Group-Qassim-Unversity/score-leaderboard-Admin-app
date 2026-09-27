@@ -68,10 +68,9 @@ jobs:
             $PROD uv run alembic upgrade head
             $PROD uv run alembic current --check-heads
 
-            # 3. Swap in the release (the previous one stays in $DIR.old) and restart.
-            #    The venv is rebuilt because its scripts hardcode the directory path.
-            rm -rf "$DIR.old"
-            if [ -d "$DIR" ]; then mv "$DIR" "$DIR.old"; fi
+            # 3. Replace the live release and restart. The venv is rebuilt because
+            #    its scripts hardcode the directory path.
+            rm -rf "$DIR"
             mv "$DIR.new" "$DIR"
             cd "$DIR"
             rm -rf .venv
