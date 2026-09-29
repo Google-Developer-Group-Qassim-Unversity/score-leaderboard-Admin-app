@@ -1,16 +1,21 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
 import sentry_sdk
+from sentry_sdk.integrations.logging import LoggingIntegration
+
+from app.sentry_health import install_delivery_watcher
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from app.clients import close_http_client, open_http_client
-from app.config import config
+from app.config import config, get_settings
 from app.DB.main import get_engine
 from app.error_handlers import register_exception_handlers
 from app.logging_config import configure_logging
 from app.middleware import RequestContextMiddleware
+from app.services import pipeline_sweep
 from app.routers import (
     attendance,
     emails,
@@ -29,11 +34,24 @@ from app.routers import (
     cache,
     wallet,
     club_structure,
+    department_permissions,
+    pipeline,
+    pipeline_requests,
 )
 
+# `event_level=ERROR` is the sentry-sdk default, stated here because it is the
+# contract the rest of the codebase logs against: WARNING is an expected outcome
+# worth keeping in the pm2 log, ERROR means something is broken and costs a slot
+# in a finite monthly error quota. Blurring the two is not free - logging routine
+# bad attendance links at ERROR exhausted the quota for a week in September 2026
+# and every real bug in that window was rejected at ingest alongside them.
 sentry_sdk.init(
-    dsn=config.SENTRY_DSN, environment="development" if config.is_dev else "production", traces_sample_rate=0.2
+    dsn=config.SENTRY_DSN,
+    environment="development" if config.is_dev else "production",
+    traces_sample_rate=0.2,
+    integrations=[LoggingIntegration(level=logging.INFO, event_level=logging.ERROR)],
 )
+install_delivery_watcher()
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +66,17 @@ async def lifespan(app: FastAPI):
     config.DATABASE_URL
     config.CLERK_GUARD
     await open_http_client()
+    # The events pipeline's timer (app/services/pipeline_sweep.py). Not under
+    # the test suite, which runs the sweep by hand with a frozen clock.
+    sweeper = None
+    if get_settings().ENV.lower() != "testing":
+        sweeper = asyncio.create_task(pipeline_sweep.sweep_forever())
     logger.info("Startup complete")
 
     yield
 
+    if sweeper is not None:
+        sweeper.cancel()
     await close_http_client()
 
     # get_engine is lru_cached; calling it here when nothing ever built an
@@ -94,3 +119,6 @@ app.include_router(upload.router)
 app.include_router(cache.router)
 app.include_router(wallet.router)
 app.include_router(club_structure.router)
+app.include_router(department_permissions.router)
+app.include_router(pipeline.router)
+app.include_router(pipeline_requests.router)

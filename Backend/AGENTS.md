@@ -75,10 +75,11 @@ uv run alembic revision -m "desc"              # new empty migration (write manu
 
 ## CI (`.github/workflows/`)
 
-All trigger on push/PR to `main` with `Backend/**` path filter:
+Two workflows, one per event:
 
-- **backend-test.yml** – `uv run pytest`
-- **backend-ruff-format.yml** – `uv run ruff format --check .`
-- **backend-ruff-autofix.yml** – `uv run ruff check --fix-only --diff .`
-- **backend-migration.yml** – MySQL 8 service container, `alembic upgrade head`
-- **deploy-backend.yml** – SSH deploy on push to main (PM2, infisical prod env, port 7501)
+- **pr.yml** – on PRs to `main`; jobs skip when their half of the repo is untouched
+  - `backend-lint` – `uv run ruff check .` and `uv run ruff format --check .`
+  - `frontend-lint` – `pnpm run lint` and `pnpm run typecheck`
+  - `test` – `RUN_CLUB_BROWSER=1 uv run pytest` (the fixtures also run `alembic upgrade head` on a fresh MySQL, and `tests/test_migrations.py` fails on multiple heads or models that no migration matches)
+- **deploy.yml** – on push to `main`; SSH-deploys whichever of backend (PM2, infisical prod env, port 7501) and frontend changed. Run it manually to redeploy both.
+  The backend deploy builds the release in `~/GDG-backend.new`, runs `alembic upgrade head` against production, replaces the live release, restarts, and fails unless `/health/db` and `/events/` answer. Migrations are never run by hand.

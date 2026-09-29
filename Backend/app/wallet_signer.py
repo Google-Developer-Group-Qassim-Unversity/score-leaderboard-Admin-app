@@ -58,7 +58,9 @@ def generate_apple_pkpass(card_data: Dict[str, Any]) -> bytes:
     """
     Generates a cryptographically signed Apple Wallet .pkpass binary buffer
     using Python cryptography PKCS#7 detached signature.
-    Uses 'eventTicket' pass type with full-bleed background.png to render the complete Figma card design.
+    Uses 'storeCard' pass type with full-bleed background.png to render the complete Figma card
+    design - background.png is only honored by PassKit for storeCard, so the 'eventTicket' style
+    used previously silently dropped it and fell back to Wallet's plain default rendering.
     """
     theme_id = card_data.get("themeId", DEFAULT_THEME)
     theme = THEMES_CONFIG.get(theme_id, THEMES_CONFIG[DEFAULT_THEME])
@@ -79,7 +81,7 @@ def generate_apple_pkpass(card_data: Dict[str, Any]) -> bytes:
     major = card_data.get("major") or ""
     level = card_data.get("studyYearOrLevel") or ""
 
-    # 1. Build pass.json with full-card eventTicket layout
+    # 1. Build pass.json with full-card storeCard layout
     pass_json = {
         "formatVersion": 1,
         "passTypeIdentifier": pass_type_id,
@@ -90,22 +92,18 @@ def generate_apple_pkpass(card_data: Dict[str, Any]) -> bytes:
         "foregroundColor": theme["fg_rgb"],
         "backgroundColor": theme["bg_rgb"],
         "labelColor": theme["label_rgb"],
-        "suppressStripShine": True,
-        "eventTicket": {
+        "storeCard": {
+            # secondaryFields/auxiliaryFields are deliberately omitted: Apple renders
+            # them as an extra text row on the card face below primaryFields, which
+            # isn't part of the card artwork's design - that detail lives on the back
+            # (backFields) instead, reachable via the info button.
             "primaryFields": [{"key": "member_name", "label": theme["role_title"], "value": full_name}],
-            "secondaryFields": [
-                {"key": "uni_id", "label": "الرقم الجامعي", "value": str(card_data.get("uniId") or "عضو موثق")}
-            ],
-            "auxiliaryFields": [
-                {"key": "institution", "label": "الجهة", "value": f"{uni_college}{(' · ' + major) if major else ''}"}
-            ],
             "backFields": [
                 {"key": "uni_id", "label": "الرقم الجامعي", "value": str(card_data.get("uniId") or "")},
                 {"key": "email", "label": "البريد الإلكتروني", "value": card_data.get("email", "")},
                 {"key": "institution", "label": "الكلية / الجهة", "value": uni_college},
                 {"key": "major", "label": "التخصص", "value": major},
                 {"key": "level", "label": "المستوى / المرحلة", "value": level},
-                {"key": "public_profile", "label": "رابط الصفحة الشخصية المعتمدة", "value": qr_target_url},
                 {"key": "club_name", "label": "النادي", "value": "Google Developer Group - Qassim"},
             ],
         },
@@ -228,13 +226,20 @@ def generate_apple_pkpass(card_data: Dict[str, Any]) -> bytes:
 def generate_google_wallet_pass_url(card_data: Dict[str, Any]) -> str:
     """
     Generates a signed Google Wallet Save Link (JWT) using RS256 algorithm.
-    Uses full card Figma artwork for heroImage to match the complete card design.
+    heroImage is the wide strip banner, not the full card artwork: Google Wallet
+    draws the barcode itself in a fixed spot mid-card, so the full artwork's own
+    empty QR frame showed up as a second, blank square under the real code.
     """
     issuer_id = config.GOOGLE_WALLET_ISSUER_ID.strip()
     class_id = config.GOOGLE_WALLET_CLASS_ID.strip() or f"{issuer_id}.gdgq-card"
     service_account_email = config.GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL.strip()
     private_key_pem = config.GOOGLE_WALLET_PRIVATE_KEY
 
+    if not issuer_id.isdigit():
+        raise ValueError(
+            "GOOGLE_WALLET_ISSUER_ID must be a numeric Google Wallet Issuer ID from the "
+            "Google Wallet API console, not a Google Pay merchant ID."
+        )
     if not service_account_email.endswith(".gserviceaccount.com"):
         raise ValueError("GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL is missing or invalid")
     if not private_key_pem.strip():
@@ -267,7 +272,7 @@ def generate_google_wallet_pass_url(card_data: Dict[str, Any]) -> str:
             "contentDescription": {"defaultValue": {"language": "ar", "value": "GDG Qassim Logo"}},
         },
         "heroImage": {
-            "sourceUri": {"uri": f"https://gdg-q.com/wallet-v2/card-{theme_id}@2x.png"},
+            "sourceUri": {"uri": f"https://gdg-q.com/wallet-v2/strip-{theme_id}@3x.png"},
             "contentDescription": {"defaultValue": {"language": "ar", "value": f"GDG Qassim {theme['role_title']}"}},
         },
         "textModulesData": [
@@ -276,10 +281,7 @@ def generate_google_wallet_pass_url(card_data: Dict[str, Any]) -> str:
         ],
         "barcode": {"type": "QR_CODE", "value": qr_target_url, "alternateText": uuid[:8].upper() if uuid else "GDGQ"},
         "linksModuleData": {
-            "uris": [
-                {"uri": qr_target_url, "description": "صفحتك الشخصية المعتمدة", "id": "profile_link"},
-                {"uri": "https://gdg-q.com", "description": "مجتمع GDG Qassim", "id": "club_site"},
-            ]
+            "uris": [{"uri": "https://gdg-q.com", "description": "مجتمع GDG Qassim", "id": "club_site"}]
         },
     }
 

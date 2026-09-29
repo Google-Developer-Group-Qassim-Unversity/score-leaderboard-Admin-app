@@ -1,6 +1,7 @@
 from typing import Optional
 import datetime
 import enum
+import uuid
 
 from sqlalchemy import (
     CheckConstraint,
@@ -14,11 +15,12 @@ from sqlalchemy import (
     Integer,
     JSON,
     String,
+    Time,
     Table,
     Text,
     text,
 )
-from sqlalchemy.dialects.mysql import DATETIME, INTEGER, LONGTEXT, TEXT, TINYINT, VARCHAR
+from sqlalchemy.dialects.mysql import CHAR, DATETIME, INTEGER, LONGTEXT, SMALLINT, TEXT, TINYINT, VARCHAR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -64,13 +66,6 @@ class ActionsActionType(str, enum.Enum):
 class DepartmentsType(str, enum.Enum):
     ADMINISTRATIVE = "administrative"
     PRACTICAL = "practical"
-
-
-class ClubAssignmentRole(str, enum.Enum):
-    PRESIDENT = "president"
-    LEADER = "leader"
-    DEPUTY = "deputy"
-    MEMBER = "member"
 
 
 class EventsLocationType(str, enum.Enum):
@@ -204,6 +199,17 @@ class OpenEventsStatus(str, enum.Enum):
     CLOSED = "closed"
 
 
+class SemesterTerm(str, enum.Enum):
+    FIRST = "first"
+    SECOND = "second"
+    SUMMER = "summer"
+
+
+# Every UUID column shares one charset/collation: MySQL foreign keys need both
+# sides to match, and tables here do not share a default charset.
+UUID_CHAR = CHAR(36, charset="ascii", collation="ascii_bin")
+
+
 class Actions(Base):
     __tablename__ = "actions"
 
@@ -226,6 +232,7 @@ class Actions(Base):
 
 class Departments(Base):
     __tablename__ = "departments"
+    __table_args__ = (Index("uq_departments_club_leadership", "club_leadership_key", unique=True),)
 
     id: Mapped[int] = mapped_column(INTEGER(unsigned=True), primary_key=True)
     name: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -238,7 +245,14 @@ class Departments(Base):
     active: Mapped[int] = mapped_column(TINYINT(1), nullable=False, server_default=text("'1'"))
     color: Mapped[str] = mapped_column(String(7), nullable=False, server_default=text("'#4285f4'"))
     icon: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'users'"))
-    leadership_enabled: Mapped[int] = mapped_column(TINYINT(1), nullable=False, server_default=text("'1'"))
+    # Left out of the department ranking when 0 (the Board, Leadership).
+    show_in_leaderboard: Mapped[int] = mapped_column(TINYINT(1), nullable=False, server_default=text("'1'"))
+    # The department whose leaders are the club's presidents. At most one:
+    # the generated key is NULL on every other row, and it is unique.
+    is_club_leadership: Mapped[int] = mapped_column(TINYINT(1), nullable=False, server_default=text("'0'"))
+    club_leadership_key: Mapped[Optional[int]] = mapped_column(
+        TINYINT(unsigned=True), Computed("CASE WHEN is_club_leadership = 1 THEN 1 END", persisted=True)
+    )
     # The creation date of departments that predate this feature is unknown.
     created_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime, nullable=True, server_default=text("CURRENT_TIMESTAMP")
@@ -252,66 +266,152 @@ class Departments(Base):
     )
 
 
-class ClubAssignments(Base):
-    """Dated organizational roles; independent of application authorization.
+class ClubRoles(Base):
+    """A role someone can hold in a department for a semester: member, vp or leader.
 
-    Generated nullable keys enforce uniqueness only for current assignments.
-    President slots are equal seats, not ranks. Closing a period frees its seat
-    while retaining the member and actor references for tenure history.
+    Rows, not an enum, so a department-specific role later is a new row.
+    ``max_holders`` is the default seat limit per department per semester
+    (NULL = unlimited); ``DepartmentRoleLimits`` overrides it for one department.
     """
 
-    __tablename__ = "club_assignments"
+    __tablename__ = "club_roles"
+    __table_args__ = (Index("uq_club_roles_key", "key", unique=True),)
+
+    id: Mapped[str] = mapped_column(UUID_CHAR, primary_key=True, default=lambda: str(uuid.uuid4()))
+    key: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    ar_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    max_holders: Mapped[Optional[int]] = mapped_column(TINYINT(unsigned=True))
+    sort_order: Mapped[int] = mapped_column(TINYINT(unsigned=True), nullable=False)
+
+
+class DepartmentRoleLimits(Base):
+    """A department's own seat limit for a role, e.g. Leadership allows two leaders."""
+
+    __tablename__ = "department_role_limits"
     __table_args__ = (
-        ForeignKeyConstraint(["member_id"], ["members.id"], name="fk_club_assignments_member", ondelete="RESTRICT"),
         ForeignKeyConstraint(
-            ["department_id"], ["departments.id"], name="fk_club_assignments_department", ondelete="RESTRICT"
+            ["department_id"], ["departments.id"], name="fk_department_role_limits_department", ondelete="CASCADE"
         ),
-        CheckConstraint(
-            "(role = 'president' AND department_id IS NULL AND president_slot IS NOT NULL "
-            "AND president_slot IN (1, 2)) OR "
-            "(role IN ('leader', 'deputy', 'member') AND department_id IS NOT NULL AND president_slot IS NULL)",
-            name="ck_club_assignments_scope",
-        ),
-        CheckConstraint("ends_at IS NULL OR ends_at >= starts_at", name="ck_club_assignments_period"),
-        Index("uq_club_assignments_current_member", "current_scope_id", "member_id", unique=True),
-        Index("uq_club_assignments_current_leader", "current_scope_id", "current_leadership_role", unique=True),
-        Index("uq_club_assignments_current_president", "current_president_slot", unique=True),
-        Index("ix_club_assignments_department_period", "department_id", "ends_at"),
-        Index("ix_club_assignments_member_period", "member_id", "starts_at"),
+        ForeignKeyConstraint(["role_id"], ["club_roles.id"], name="fk_department_role_limits_role", ondelete="CASCADE"),
     )
 
-    id: Mapped[int] = mapped_column(INTEGER(unsigned=True), primary_key=True)
-    member_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
-    department_id: Mapped[Optional[int]] = mapped_column(INTEGER(unsigned=True))
-    role: Mapped[ClubAssignmentRole] = mapped_column(
-        Enum(ClubAssignmentRole, values_callable=lambda cls: [member.value for member in cls]), nullable=False
+    department_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), primary_key=True)
+    role_id: Mapped[str] = mapped_column(UUID_CHAR, primary_key=True)
+    max_holders: Mapped[Optional[int]] = mapped_column(TINYINT(unsigned=True))
+
+
+class SemesterDepartments(Base):
+    """A department that existed in a semester, with the name it had then (NULL = its current name)."""
+
+    __tablename__ = "semester_departments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["semester_id"], ["semesters.id"], name="fk_semester_departments_semester", ondelete="CASCADE"
+        ),
+        ForeignKeyConstraint(
+            ["department_id"], ["departments.id"], name="fk_semester_departments_department", ondelete="RESTRICT"
+        ),
     )
-    president_slot: Mapped[Optional[int]] = mapped_column(TINYINT(unsigned=True))
-    starts_at: Mapped[datetime.datetime] = mapped_column(
+
+    semester_id: Mapped[str] = mapped_column(UUID_CHAR, primary_key=True)
+    department_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), primary_key=True)
+    name: Mapped[Optional[str]] = mapped_column(String(50))
+    ar_name: Mapped[Optional[str]] = mapped_column(VARCHAR(100, charset="utf8mb4", collation="utf8mb4_0900_ai_ci"))
+
+    department: Mapped["Departments"] = relationship("Departments")
+
+
+class ClubMemberships(Base):
+    """One role one person holds in one department for one semester.
+
+    A leader or VP also has a ``member`` row in the same department; the
+    service keeps the two in step. Seat limits are checked by the service
+    under a lock on the ``semester_departments`` row.
+    """
+
+    __tablename__ = "club_memberships"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["semester_id", "department_id"],
+            ["semester_departments.semester_id", "semester_departments.department_id"],
+            name="fk_club_memberships_semester_department",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(["member_id"], ["members.id"], name="fk_club_memberships_member", ondelete="RESTRICT"),
+        ForeignKeyConstraint(["role_id"], ["club_roles.id"], name="fk_club_memberships_role", ondelete="RESTRICT"),
+        Index("uq_club_memberships_member_role", "semester_id", "department_id", "member_id", "role_id", unique=True),
+        Index("ix_club_memberships_member", "member_id", "semester_id"),
+        Index("ix_club_memberships_role", "semester_id", "department_id", "role_id"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID_CHAR, primary_key=True, default=lambda: str(uuid.uuid4()))
+    semester_id: Mapped[str] = mapped_column(UUID_CHAR, nullable=False)
+    department_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    member_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    role_id: Mapped[str] = mapped_column(UUID_CHAR, nullable=False)
+    # Clerk subject IDs are available even when an admin has no members row.
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
         DATETIME(fsp=6), nullable=False, server_default=text("CURRENT_TIMESTAMP(6)")
     )
-    ends_at: Mapped[Optional[datetime.datetime]] = mapped_column(DATETIME(fsp=6))
-    # Clerk subject IDs are available even when an admin has no members row.
-    changed_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    ended_by: Mapped[Optional[str]] = mapped_column(String(255))
-    current_scope_id: Mapped[Optional[int]] = mapped_column(
-        INTEGER(unsigned=True), Computed("CASE WHEN ends_at IS NULL THEN COALESCE(department_id, 0) END")
-    )
-    current_leadership_role: Mapped[Optional[str]] = mapped_column(
-        String(6), Computed("CASE WHEN ends_at IS NULL AND role IN ('leader', 'deputy') THEN role END")
-    )
-    current_president_slot: Mapped[Optional[int]] = mapped_column(
-        TINYINT(unsigned=True), Computed("CASE WHEN ends_at IS NULL THEN president_slot END")
+
+    member: Mapped["Members"] = relationship("Members")
+    role: Mapped["ClubRoles"] = relationship("ClubRoles")
+
+
+class ClubMembershipAction(str, enum.Enum):
+    ADDED = "added"
+    REMOVED = "removed"
+
+
+class ClubMembershipChanges(Base):
+    """Append-only: who added or removed which role, when."""
+
+    __tablename__ = "club_membership_changes"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["semester_id"], ["semesters.id"], name="fk_club_membership_changes_semester", ondelete="CASCADE"
+        ),
+        ForeignKeyConstraint(
+            ["department_id"], ["departments.id"], name="fk_club_membership_changes_department", ondelete="RESTRICT"
+        ),
+        ForeignKeyConstraint(
+            ["member_id"], ["members.id"], name="fk_club_membership_changes_member", ondelete="RESTRICT"
+        ),
+        ForeignKeyConstraint(
+            ["role_id"], ["club_roles.id"], name="fk_club_membership_changes_role", ondelete="RESTRICT"
+        ),
+        Index("ix_club_membership_changes_scope", "semester_id", "department_id", "created_at"),
+        Index("ix_club_membership_changes_member", "member_id", "created_at"),
     )
 
-    # No delete cascades: removing a referenced person/department must not erase tenure.
+    id: Mapped[str] = mapped_column(UUID_CHAR, primary_key=True, default=lambda: str(uuid.uuid4()))
+    semester_id: Mapped[str] = mapped_column(UUID_CHAR, nullable=False)
+    department_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    member_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    role_id: Mapped[str] = mapped_column(UUID_CHAR, nullable=False)
+    action: Mapped[ClubMembershipAction] = mapped_column(
+        Enum(ClubMembershipAction, values_callable=lambda cls: [member.value for member in cls]), nullable=False
+    )
+    actor: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DATETIME(fsp=6), nullable=False, server_default=text("CURRENT_TIMESTAMP(6)")
+    )
+
     member: Mapped["Members"] = relationship("Members")
-    department: Mapped[Optional["Departments"]] = relationship("Departments")
+    role: Mapped["ClubRoles"] = relationship("ClubRoles")
+    department: Mapped["Departments"] = relationship("Departments")
 
 
 class Events(Base):
     __tablename__ = "events"
-    __table_args__ = (Index("event_name", "name"), Index("events_id_IDX", "id", "name"))
+    __table_args__ = (
+        ForeignKeyConstraint(["semester_id"], ["semesters.id"], ondelete="RESTRICT", name="fk_events_semester"),
+        Index("event_name", "name"),
+        Index("events_id_IDX", "id", "name"),
+        Index("ix_events_semester_start", "semester_id", "start_datetime"),
+    )
 
     id: Mapped[int] = mapped_column(INTEGER(unsigned=True), primary_key=True)
     name: Mapped[str] = mapped_column(VARCHAR(150, charset="utf8mb4", collation="utf8mb4_0900_ai_ci"), nullable=False)
@@ -336,10 +436,14 @@ class Events(Base):
     # full-event update, so editing an event cannot silently drop it.
     meeting_url: Mapped[Optional[str]] = mapped_column(VARCHAR(500, charset="utf8mb4", collation="utf8mb4_0900_ai_ci"))
     is_official: Mapped[Optional[int]] = mapped_column(TINYINT(1), server_default=text("'0'"))
+    # The semester the event counts toward. Set from the end date when the event
+    # is saved (app/semesters.py), and never moved by editing a semester's dates.
+    semester_id: Mapped[str] = mapped_column(UUID_CHAR, nullable=False)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
 
+    semester: Mapped["Semesters"] = relationship("Semesters")
     forms: Mapped[list["Forms"]] = relationship("Forms", back_populates="event", passive_deletes=True)
     logs: Mapped[list["Logs"]] = relationship("Logs", back_populates="event", passive_deletes=True)
     email_logs: Mapped[list["EmailLogs"]] = relationship("EmailLogs", back_populates="event", passive_deletes=True)
@@ -771,21 +875,61 @@ class EmailTemplates(Base):
 
 
 class Semesters(Base):
-    """An academic semester and the date range its events/points are counted in.
+    """An academic term. Events (and, later, the club structure) point at it by ``id``.
 
-    ``id`` is the university's term code (e.g. 475) and is chosen by the admin,
-    not auto-generated. Exactly one row is expected to have ``is_current`` set;
-    it is the semester used when a request doesn't name one. ``is_public`` rows
-    are readable by anyone, the rest require super admin credentials.
+    A semester is described by three facts an admin enters - ``term``,
+    ``hijri_year`` and ``academic_year_start`` - and MySQL derives the rest, so
+    a code can never disagree with its term:
+
+    - ``hijri_code``: the university's number, e.g. 471 / 472 / 475. The Hijri
+      year's last two digits, then 1 (first), 2 (second) or 5 (summer).
+    - ``gregorian_code``: ours, e.g. 251 / 252 / 253. The academic start year's
+      last two digits, then 1, 2 or 3.
+    - ``name``: "Fall 2025" / "Spring 2026" / "Summer 2026".
+
+    There is no "current" flag: the current semester is the most recent one
+    that has started (see ``app/semesters.py``). ``is_public`` rows are readable
+    by anyone, the rest require super admin credentials.
     """
 
     __tablename__ = "semesters"
+    __table_args__ = (
+        Index("uq_semesters_hijri_code", "hijri_code", unique=True),
+        Index("uq_semesters_gregorian_code", "gregorian_code", unique=True),
+        Index("uq_semesters_hijri_year_term", "hijri_year", "term", unique=True),
+        CheckConstraint("end_date >= start_date", name="ck_semesters_dates"),
+    )
 
-    id: Mapped[int] = mapped_column(INTEGER(unsigned=True), primary_key=True, autoincrement=False)
-    name: Mapped[Optional[str]] = mapped_column(VARCHAR(100, charset="utf8mb4", collation="utf8mb4_0900_ai_ci"))
+    id: Mapped[str] = mapped_column(UUID_CHAR, primary_key=True, default=lambda: str(uuid.uuid4()))
+    term: Mapped[SemesterTerm] = mapped_column(
+        Enum(SemesterTerm, values_callable=lambda cls: [member.value for member in cls]), nullable=False
+    )
+    hijri_year: Mapped[int] = mapped_column(SMALLINT(unsigned=True), nullable=False)
+    academic_year_start: Mapped[int] = mapped_column(SMALLINT(unsigned=True), nullable=False)
+    # Same expressions as migration d1e2f3a4b5c6.
+    hijri_code: Mapped[int] = mapped_column(
+        SMALLINT(unsigned=True),
+        Computed(
+            "(hijri_year % 100) * 10 + CASE term WHEN 'first' THEN 1 WHEN 'second' THEN 2 ELSE 5 END", persisted=True
+        ),
+    )
+    gregorian_code: Mapped[int] = mapped_column(
+        SMALLINT(unsigned=True),
+        Computed(
+            "(academic_year_start % 100) * 10 + CASE term WHEN 'first' THEN 1 WHEN 'second' THEN 2 ELSE 3 END",
+            persisted=True,
+        ),
+    )
+    name: Mapped[str] = mapped_column(
+        String(20),
+        Computed(
+            "CONCAT(CASE term WHEN 'first' THEN 'Fall' WHEN 'second' THEN 'Spring' ELSE 'Summer' END, ' ', "
+            "academic_year_start + (term <> 'first'))",
+            persisted=True,
+        ),
+    )
     start_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
     end_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
-    is_current: Mapped[int] = mapped_column(TINYINT(1), nullable=False, server_default=text("'0'"))
     is_public: Mapped[int] = mapped_column(TINYINT(1), nullable=False, server_default=text("'1'"))
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
@@ -793,6 +937,369 @@ class Semesters(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP")
     )
+
+
+class PipelineTeam(str, enum.Enum):
+    """The three departments every event request passes through."""
+
+    DESIGN = "design"
+    LOGISTICS = "logistics"
+    MEDIA = "media"
+
+
+class PipelineTeams(Base):
+    """Which department plays which part in the events pipeline. Set by a super admin."""
+
+    __tablename__ = "pipeline_teams"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["department_id"], ["departments.id"], name="fk_pipeline_teams_department", ondelete="RESTRICT"
+        ),
+        Index("uq_pipeline_teams_department", "department_id", unique=True),
+    )
+
+    team: Mapped[PipelineTeam] = mapped_column(
+        Enum(PipelineTeam, values_callable=lambda cls: [member.value for member in cls]), primary_key=True
+    )
+    department_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+
+    department: Mapped["Departments"] = relationship("Departments")
+
+
+class DepartmentPermissions(Base):
+    """A member a department's leader or VP allowed to act for the department in the pipeline.
+
+    Leaders and VPs act for their department without a row here; this table is
+    only the people they granted it to. Revoking keeps the row. At most one
+    active grant per member and department: the generated key is NULL once a
+    grant is revoked, and unique while it is not.
+    """
+
+    __tablename__ = "department_permissions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["member_id"], ["members.id"], name="fk_department_permissions_member", ondelete="CASCADE"
+        ),
+        ForeignKeyConstraint(
+            ["department_id"], ["departments.id"], name="fk_department_permissions_department", ondelete="CASCADE"
+        ),
+        ForeignKeyConstraint(
+            ["granted_by"], ["members.id"], name="fk_department_permissions_granted_by", ondelete="RESTRICT"
+        ),
+        ForeignKeyConstraint(
+            ["revoked_by"], ["members.id"], name="fk_department_permissions_revoked_by", ondelete="RESTRICT"
+        ),
+        Index("uq_department_permissions_active", "member_id", "department_id", "active_key", unique=True),
+        Index("ix_department_permissions_department", "department_id"),
+    )
+
+    id: Mapped[int] = mapped_column(INTEGER(unsigned=True), primary_key=True)
+    member_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    department_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    granted_by: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    granted_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    revoked_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    revoked_by: Mapped[Optional[int]] = mapped_column(INTEGER(unsigned=True))
+    active_key: Mapped[Optional[int]] = mapped_column(
+        TINYINT(unsigned=True), Computed("CASE WHEN revoked_at IS NULL THEN 1 END", persisted=True)
+    )
+
+    member: Mapped["Members"] = relationship("Members", foreign_keys=[member_id])
+    granter: Mapped["Members"] = relationship("Members", foreign_keys=[granted_by])
+
+
+class BookingBans(Base):
+    """A day Logistics closed to bookings, e.g. exams. Every team sees the reason."""
+
+    __tablename__ = "booking_bans"
+    __table_args__ = (
+        ForeignKeyConstraint(["banned_by"], ["members.id"], name="fk_booking_bans_banned_by", ondelete="RESTRICT"),
+    )
+
+    date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
+    reason: Mapped[Optional[str]] = mapped_column(VARCHAR(200, charset="utf8mb4", collation="utf8mb4_0900_ai_ci"))
+    banned_by: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
+class EventRequestStage(str, enum.Enum):
+    """Where an event request is. The whole path is here from the start; see docs/EVENTS_PIPELINE.md."""
+
+    DRAFT = "draft"
+    IN_REVIEW = "in_review"
+    RETURNED = "returned"
+    MEDIA = "media"
+    READY = "ready"
+    PUBLISHED = "published"
+    CANCELLED = "cancelled"
+
+
+class EventRequestUndatedReason(str, enum.Enum):
+    HOLD_EXPIRED = "hold_expired"
+    DAY_BANNED = "day_banned"
+
+
+class EventRequestType(str, enum.Enum):
+    COURSE = "course"
+    BOOTCAMP = "bootcamp"
+    MEETUP = "meetup"
+    WORKSHOP = "workshop"
+    COMPETITION = "competition"
+
+
+class EventRequestLocationScope(str, enum.Enum):
+    INSIDE = "inside"
+    OUTSIDE = "outside"
+
+
+class EventRequestAudience(str, enum.Enum):
+    MALE = "male"
+    FEMALE = "female"
+    MIXED = "mixed"
+    NONE = "none"
+
+
+class EventRequestRegistration(str, enum.Enum):
+    ACCEPTANCE = "acceptance"
+    OPEN = "open"
+    NONE = "none"
+
+
+def _enum(cls):
+    return Enum(cls, values_callable=lambda members: [member.value for member in members])
+
+
+class EventRequests(Base):
+    """A department's request to hold an event, from booking its dates to publishing it.
+
+    The dates are held for 24 hours while the request is a draft
+    (``hold_expires_at``), and stay taken from submit until it is published. A
+    request that loses its dates keeps everything else and says why in
+    ``undated_reason``. The event details are real columns because the
+    calendar and publish read them; they are all nullable while the request is
+    a draft and checked on submit.
+    """
+
+    __tablename__ = "event_requests"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["department_id"], ["departments.id"], name="fk_event_requests_department", ondelete="RESTRICT"
+        ),
+        ForeignKeyConstraint(["created_by"], ["members.id"], name="fk_event_requests_created_by", ondelete="RESTRICT"),
+        ForeignKeyConstraint(["event_id"], ["events.id"], name="fk_event_requests_event", ondelete="SET NULL"),
+        CheckConstraint("end_date >= start_date", name="ck_event_requests_dates"),
+        Index("ix_event_requests_dates", "start_date", "end_date"),
+        Index("ix_event_requests_department_stage", "department_id", "stage"),
+        Index("ix_event_requests_stage", "stage"),
+    )
+
+    id: Mapped[int] = mapped_column(INTEGER(unsigned=True), primary_key=True)
+    department_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    created_by: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    stage: Mapped[EventRequestStage] = mapped_column(
+        _enum(EventRequestStage), nullable=False, server_default=text("'draft'")
+    )
+    start_date: Mapped[Optional[datetime.date]] = mapped_column(Date)
+    end_date: Mapped[Optional[datetime.date]] = mapped_column(Date)
+    hold_expires_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    undated_reason: Mapped[Optional[EventRequestUndatedReason]] = mapped_column(_enum(EventRequestUndatedReason))
+
+    title: Mapped[Optional[str]] = mapped_column(VARCHAR(150, charset="utf8mb4", collation="utf8mb4_0900_ai_ci"))
+    description: Mapped[Optional[str]] = mapped_column(TEXT(charset="utf8mb4", collation="utf8mb4_0900_ai_ci"))
+    event_type: Mapped[Optional[EventRequestType]] = mapped_column(_enum(EventRequestType))
+    presenter_name: Mapped[Optional[str]] = mapped_column(
+        VARCHAR(100, charset="utf8mb4", collation="utf8mb4_0900_ai_ci")
+    )
+    presenter_email: Mapped[Optional[str]] = mapped_column(String(150))
+    # {"2026-10-12": "on_site", "2026-10-13": "online"} - one entry per booked day.
+    day_modes: Mapped[Optional[dict]] = mapped_column(JSON)
+    daily_start_time: Mapped[Optional[datetime.time]] = mapped_column(Time)
+    daily_end_time: Mapped[Optional[datetime.time]] = mapped_column(Time)
+    is_official: Mapped[Optional[int]] = mapped_column(TINYINT(1))
+    location_scope: Mapped[Optional[EventRequestLocationScope]] = mapped_column(_enum(EventRequestLocationScope))
+    audience: Mapped[Optional[EventRequestAudience]] = mapped_column(_enum(EventRequestAudience))
+    registration: Mapped[Optional[EventRequestRegistration]] = mapped_column(_enum(EventRequestRegistration))
+    expected_accepted: Mapped[Optional[int]] = mapped_column(INTEGER(unsigned=True))
+    help_needed: Mapped[Optional[str]] = mapped_column(TEXT(charset="utf8mb4", collation="utf8mb4_0900_ai_ci"))
+
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP")
+    )
+    submitted_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    event_id: Mapped[Optional[int]] = mapped_column(INTEGER(unsigned=True))
+
+    # Design can return a request once, within two days of receiving it; the team then has 12 hours.
+    returned_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    return_count: Mapped[int] = mapped_column(TINYINT(unsigned=True), nullable=False, server_default=text("'0'"))
+    return_notes: Mapped[Optional[str]] = mapped_column(TEXT(charset="utf8mb4", collation="utf8mb4_0900_ai_ci"))
+    return_due_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+
+    department: Mapped["Departments"] = relationship("Departments")
+    creator: Mapped["Members"] = relationship("Members")
+    partners: Mapped[list["EventRequestPartners"]] = relationship(
+        "EventRequestPartners", passive_deletes=True, cascade="all, delete-orphan"
+    )
+    tasks: Mapped[list["EventRequestTasks"]] = relationship(
+        "EventRequestTasks", passive_deletes=True, cascade="all, delete-orphan", order_by="EventRequestTasks.id"
+    )
+
+
+class EventRequestPartners(Base):
+    """Another department the event is run with."""
+
+    __tablename__ = "event_request_partners"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["request_id"], ["event_requests.id"], name="fk_event_request_partners_request", ondelete="CASCADE"
+        ),
+        ForeignKeyConstraint(
+            ["department_id"], ["departments.id"], name="fk_event_request_partners_department", ondelete="RESTRICT"
+        ),
+    )
+
+    request_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), primary_key=True)
+    department_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), primary_key=True)
+
+    department: Mapped["Departments"] = relationship("Departments")
+
+
+class EventRequestTaskStatus(str, enum.Enum):
+    BRIEF = "brief"  # the requesting team is still writing the brief
+    OPEN = "open"  # the team has it
+    RETURNED = "returned"  # sent back to the requesting team
+    DONE = "done"
+
+
+class EventRequestTasks(Base):
+    """One team's part of a request: its brief (JSON, versioned by a Pydantic model in code) and its progress."""
+
+    __tablename__ = "event_request_tasks"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["request_id"], ["event_requests.id"], name="fk_event_request_tasks_request", ondelete="CASCADE"
+        ),
+        ForeignKeyConstraint(
+            ["completed_by"], ["members.id"], name="fk_event_request_tasks_completed_by", ondelete="RESTRICT"
+        ),
+        Index("uq_event_request_tasks_team", "request_id", "team", unique=True),
+        Index("ix_event_request_tasks_team_status", "team", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(INTEGER(unsigned=True), primary_key=True)
+    request_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    team: Mapped[PipelineTeam] = mapped_column(_enum(PipelineTeam), nullable=False)
+    status: Mapped[EventRequestTaskStatus] = mapped_column(
+        _enum(EventRequestTaskStatus), nullable=False, server_default=text("'brief'")
+    )
+    brief: Mapped[Optional[dict]] = mapped_column(JSON)
+    brief_version: Mapped[Optional[int]] = mapped_column(SMALLINT(unsigned=True))
+    opened_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    completed_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    completed_by: Mapped[Optional[int]] = mapped_column(INTEGER(unsigned=True))
+
+    completer: Mapped[Optional["Members"]] = relationship("Members")
+
+
+class PipelineNotificationKind(str, enum.Enum):
+    REQUEST_RECEIVED = "request_received"
+    DATES_BANNED = "dates_banned"
+    HOLD_EXPIRED = "hold_expired"
+    RETURNED = "returned"
+    TASK_DONE = "task_done"
+    MEDIA_RECEIVED = "media_received"
+    READY_TO_PUBLISH = "ready_to_publish"
+
+
+class PipelineNotifications(Base):
+    """Something that happened to a request, shown on the dashboards of one department's pipeline users."""
+
+    __tablename__ = "pipeline_notifications"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["department_id"], ["departments.id"], name="fk_pipeline_notifications_department", ondelete="CASCADE"
+        ),
+        ForeignKeyConstraint(
+            ["request_id"], ["event_requests.id"], name="fk_pipeline_notifications_request", ondelete="CASCADE"
+        ),
+        Index("ix_pipeline_notifications_department", "department_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(INTEGER(unsigned=True), primary_key=True)
+    department_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    request_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    kind: Mapped[PipelineNotificationKind] = mapped_column(_enum(PipelineNotificationKind), nullable=False)
+    payload: Mapped[Optional[dict]] = mapped_column(JSON)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    department: Mapped["Departments"] = relationship("Departments")
+    request: Mapped["EventRequests"] = relationship("EventRequests")
+
+
+class PipelineNotificationReads(Base):
+    """Each person marks their own notifications read."""
+
+    __tablename__ = "pipeline_notification_reads"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["notification_id"],
+            ["pipeline_notifications.id"],
+            name="fk_pipeline_notification_reads_notification",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["member_id"], ["members.id"], name="fk_pipeline_notification_reads_member", ondelete="CASCADE"
+        ),
+    )
+
+    notification_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), primary_key=True)
+    member_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), primary_key=True)
+    read_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
+class PipelinePenalties(Base):
+    """Points a department loses for fixing a returned request late.
+
+    One row per request; the sweep grows ``late_days`` while the request stays
+    late. It is applied as a discount on the department's log for the real
+    event when the request is published (``applied_log_id``), not before.
+    """
+
+    __tablename__ = "pipeline_penalties"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["request_id"], ["event_requests.id"], name="fk_pipeline_penalties_request", ondelete="CASCADE"
+        ),
+        ForeignKeyConstraint(
+            ["department_id"], ["departments.id"], name="fk_pipeline_penalties_department", ondelete="CASCADE"
+        ),
+        ForeignKeyConstraint(["applied_log_id"], ["logs.id"], name="fk_pipeline_penalties_log", ondelete="SET NULL"),
+        Index("uq_pipeline_penalties_request", "request_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(INTEGER(unsigned=True), primary_key=True)
+    request_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    department_id: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    late_days: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    points: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
+    reason: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP")
+    )
+    applied_log_id: Mapped[Optional[int]] = mapped_column(INTEGER(unsigned=True))
 
 
 # =============================================================================

@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import HTTPException
 
 
@@ -31,6 +33,34 @@ class ClubStructureConflict(KnownHttpException):
 class InvalidClubStructure(KnownHttpException):
     def __init__(self, detail: str):
         super().__init__(status_code=422, detail=detail)
+
+
+class DepartmentForbidden(KnownHttpException):
+    """The caller cannot act for this department in the events pipeline."""
+
+    code = "department_forbidden"
+
+    def __init__(self, department_id: int, action: str = "act for"):
+        super().__init__(status_code=403, detail=f"You cannot {action} department {department_id}")
+
+
+class PipelineConflict(KnownHttpException):
+    """An events-pipeline rule refused the change. ``code`` says which rule."""
+
+    def __init__(self, code: str, detail: str, status_code: int = 409):
+        super().__init__(status_code=status_code, detail=detail)
+        self.code = code
+
+
+class IncompleteRequest(KnownHttpException):
+    """Submit found fields still missing. ``detail`` lists them the way FastAPI lists a 422."""
+
+    code = "incomplete"
+
+    def __init__(self, missing: list[str]):
+        super().__init__(
+            status_code=422, detail=[{"loc": field.split("."), "msg": f"{field} is required"} for field in missing]
+        )
 
 
 class DataIntegrityError(HTTPException):
@@ -127,6 +157,36 @@ class NoSemestersDefined(KnownHttpException):
         super().__init__(
             status_code=409,
             detail="No semesters are defined. Add one from the admin app before using semester-scoped endpoints.",
+        )
+
+
+class NoSemesterForDate(KnownHttpException):
+    """An event ends before the oldest semester, so it has no semester to belong to."""
+
+    code = "no_semester_for_date"
+
+    def __init__(self, day: date):
+        super().__init__(
+            status_code=422,
+            detail=f"No semester had started by {day.isoformat()}. Add that semester from the admin app first.",
+        )
+
+
+class SemesterHasEvents(KnownHttpException):
+    code = "semester_has_events"
+
+    def __init__(self, name: str, event_count: int):
+        super().__init__(
+            status_code=409, detail=f"{name} has {event_count} events and cannot be deleted. Move or delete them first."
+        )
+
+
+class SemesterHasRoster(KnownHttpException):
+    code = "semester_has_roster"
+
+    def __init__(self, name: str):
+        super().__init__(
+            status_code=409, detail=f"{name} has a club structure roster and cannot be deleted. Empty its roster first."
         )
 
 

@@ -37,7 +37,7 @@ These are enforced by tests, not just preference:
 - **Auth** is a dependency, not a parameter. Use
   `dependencies=[Depends(admin_guard)]` on the route or router when the handler
   does not need the token, and `member: CurrentMember` when it needs the caller.
-  `tests/test_route_auth.py` pins the guard on all 103 routes and fails if one
+  `tests/test_route_auth.py` pins the guard on all 131 routes and fails if one
   changes.
 - **Every route declares a `response_model`.** `response_model` silently drops
   undeclared keys, and the leaderboard app (a separate repository) consumes
