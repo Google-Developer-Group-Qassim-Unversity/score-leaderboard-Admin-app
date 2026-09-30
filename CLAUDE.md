@@ -34,11 +34,15 @@ These are enforced by tests, not just preference:
 - **Errors** are raised, not translated. `app/error_handlers.py` owns the
   mapping to HTTP responses; handlers should not wrap themselves in
   `try/except` to produce a 500.
-- **Auth** is a dependency, not a parameter. Use
-  `dependencies=[Depends(admin_guard)]` on the route or router when the handler
-  does not need the token, and `member: CurrentMember` when it needs the caller.
-  `tests/test_route_auth.py` pins the guard on all 131 routes and fails if one
-  changes.
+- **Auth** is a dependency, not a parameter, and it comes from our database,
+  never from Clerk metadata. Admin routes take a permission guard from
+  `app/services/permissions/guards.py`: `Staff`, `Require(Perm.X)`,
+  `Require(Perm.X, event_departments)` when the permission is checked against
+  the department of the thing in the path, or `SuperAdmin`. Use
+  `member: CurrentMember` when the handler needs the caller, and `CurrentAccess`
+  when it checks a permission itself (e.g. a department from the body).
+  `tests/test_route_auth.py` pins the permission on every route and fails if
+  one changes.
 - **Every route declares a `response_model`.** `response_model` silently drops
   undeclared keys, and the leaderboard app (a separate repository) consumes
   several of these endpoints, so `tests/test_response_models.py` checks each
