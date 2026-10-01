@@ -434,6 +434,8 @@
       "official": "فعالية رسمية",
       "department": "القسم *",
       "departmentPlaceholder": "اختر القسم...",
+      "practicalDepartments": "الأقسام التخصصية",
+      "administrativeDepartments": "الأقسام الإدارية",
       "departmentAction": "إجراء القسم *",
       "departmentActionPlaceholder": "اختر إجراء القسم...",
       "attendanceAccess": "آلية الحضور"

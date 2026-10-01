@@ -24,7 +24,7 @@ import { useEventDetails, useActions, useUpdateEvent, useDepartments, useDeleteE
 import { shouldContactSupport } from "@/lib/api/errors";
 import { parseLocalDateTime, formatLocalDateTime } from "@/lib/utils";
 import { useEventContext } from "@/contexts/event-context";
-import type { LocationType, EventAction, Action } from "@/lib/api-types";
+import type { LocationType, EventAction, Action, Department } from "@/lib/api-types";
 import { useTranslations } from "next-intl";
 
 export default function EventEditPage() {
@@ -87,6 +87,21 @@ export default function EventEditPage() {
     };
   }, [eventDetails, findCompositeAction]);
 
+  // If the event's department was archived since the event was created, it no
+  // longer comes back from GET /departments - pass it along so the saved
+  // value stays selectable instead of blanking out.
+  const additionalDepartments = React.useMemo((): Department[] | undefined => {
+    const departmentId = initialFormData?.department_id;
+    if (!departmentId || !eventDetails?.actions[0]) return undefined;
+    if (departments?.some((d) => d.id === departmentId)) return undefined;
+    return [{
+      id: departmentId,
+      name: "",
+      ar_name: eventDetails.actions[0].department_ar_name,
+      type: "practical",
+    }];
+  }, [eventDetails, departments, initialFormData]);
+
   if (!event) {
     return null;
   }
@@ -95,7 +110,9 @@ export default function EventEditPage() {
 
   const handleSubmit = async (data: EventFormData) => {
     try {
-      const selectedDepartment = departments?.find(d => d.id === data.department_id);
+      const selectedDepartment = [...departments ?? [], ...additionalDepartments ?? []].find(
+        d => d.id === data.department_id,
+      );
       
       const departmentAction: EventAction = {
         action_id: data.composite_action[0].id,
@@ -261,6 +278,7 @@ export default function EventEditPage() {
           mode="edit"
           eventId={event.id}
           initialData={initialFormData}
+          additionalDepartments={additionalDepartments}
           onSubmit={handleSubmit}
           isSubmitting={updateEventMutation.isPending}
           getToken={getToken}

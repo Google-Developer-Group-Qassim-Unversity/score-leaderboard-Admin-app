@@ -4,7 +4,7 @@ from .schema import Departments
 
 
 def get_departments(session: Session):
-    statement = select(Departments)
+    statement = select(Departments).where(Departments.active == 1, Departments.show_in_leaderboard == 1)
     departments = session.scalars(statement).all()
     return departments
 

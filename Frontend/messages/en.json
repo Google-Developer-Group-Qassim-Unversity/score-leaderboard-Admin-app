@@ -434,6 +434,8 @@
       "official": "Official Event",
       "department": "Department *",
       "departmentPlaceholder": "Select a department...",
+      "practicalDepartments": "Specialized departments",
+      "administrativeDepartments": "Administrative departments",
       "departmentAction": "Department Action *",
       "departmentActionPlaceholder": "Select a department action...",
       "attendanceAccess": "Attendance Access"

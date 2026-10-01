@@ -21,13 +21,15 @@ import { EventImageUpload } from "@/components/event-image-upload";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { useEventForm } from "@/hooks/use-create-event-form";
 import { useActions, useDepartments } from "@/hooks/use-event";
-import type { Action, LocationType } from "@/lib/api-types";
+import type { Action, Department, LocationType } from "@/lib/api-types";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { useTranslations } from "next-intl";
 
@@ -67,6 +69,22 @@ export interface EventFormProps {
   getToken: () => Promise<string | null>;
   submitButtonText?: string;
   submittingText?: string;
+  /**
+   * Departments to keep selectable even though the API no longer lists them
+   * (e.g. the archived department an event is already filed under), so the
+   * saved value does not blank out on edit.
+   */
+  additionalDepartments?: Department[];
+}
+
+/** Keep the event's own department selectable even if it is inactive. */
+function departmentsWithOptions(
+  departments: Department[] | undefined,
+  additionalDepartments: Department[] | undefined,
+): Department[] {
+  if (!additionalDepartments?.length) return departments ?? [];
+  const knownIds = new Set(departments?.map((d) => d.id) ?? []);
+  return [...departments ?? [], ...additionalDepartments.filter((d) => !knownIds.has(d.id))];
 }
 
 export function EventForm({
@@ -78,6 +96,7 @@ export function EventForm({
   getToken,
   submitButtonText,
   submittingText,
+  additionalDepartments,
 }: EventFormProps) {
   const t = useTranslations("eventForm");
   const tv = useTranslations("eventForm.validation");
@@ -126,6 +145,13 @@ export function EventForm({
   const { data: actionsData, isLoading: isLoadingActions } = useActions();
   const { data: departments, isLoading: isLoadingDepartments } = useDepartments();
 
+  const departmentOptions = React.useMemo(
+    () => departmentsWithOptions(departments, additionalDepartments),
+    [departments, additionalDepartments],
+  );
+
+  const practicalDepartments = departmentOptions.filter((dept) => dept.type === "practical");
+  const administrativeDepartments = departmentOptions.filter((dept) => dept.type === "administrative");
 
   // Get composite actions directly
   const compositeActions = React.useMemo(() => {
@@ -357,11 +383,26 @@ export function EventForm({
                   <SelectValue placeholder={t("fields.departmentPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
-                  {departments?.map((dept) => (
-                    <SelectItem key={dept.id} value={dept.id.toString()}>
-                      {dept.ar_name}
-                    </SelectItem>
-                  ))}
+                  {practicalDepartments.length > 0 && (
+                    <SelectGroup>
+                      <SelectLabel>{t("fields.practicalDepartments")}</SelectLabel>
+                      {practicalDepartments.map((dept) => (
+                        <SelectItem key={dept.id} value={dept.id.toString()}>
+                          {dept.ar_name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )}
+                  {administrativeDepartments.length > 0 && (
+                    <SelectGroup>
+                      <SelectLabel>{t("fields.administrativeDepartments")}</SelectLabel>
+                      {administrativeDepartments.map((dept) => (
+                        <SelectItem key={dept.id} value={dept.id.toString()}>
+                          {dept.ar_name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )}
                 </SelectContent>
               </Select>
             )}
