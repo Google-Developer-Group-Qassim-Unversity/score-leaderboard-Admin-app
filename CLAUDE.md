@@ -42,7 +42,8 @@ These are enforced by tests, not just preference:
   `member: CurrentMember` when the handler needs the caller, and `CurrentAccess`
   when it checks a permission itself (e.g. a department from the body).
   `tests/test_route_auth.py` pins the permission on every route and fails if
-  one changes.
+  one changes. [Backend/docs/PERMISSIONS.md](Backend/docs/PERMISSIONS.md)
+  explains the model and how to add a permission.
 - **Every route declares a `response_model`.** `response_model` silently drops
   undeclared keys, and the leaderboard app (a separate repository) consumes
   several of these endpoints, so `tests/test_response_models.py` checks each
