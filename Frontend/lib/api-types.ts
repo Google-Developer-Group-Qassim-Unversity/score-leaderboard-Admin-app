@@ -362,10 +362,20 @@ export interface BatchCreateMembersResponse {
 // Custom Points (Department)
 // =============================================================================
 
+/** A department a saved point row references. Kept in the response so a row
+ * pointing at a department that left GET /departments (archived or unranked
+ * since it was saved) still shows and can be removed in the editor. */
+export interface CustomPointDepartment {
+  id: number;
+  name: string;
+  ar_name: string;
+}
+
 /** A single point detail row in a custom event */
 export interface CustomPointDetail {
   log_id?: number;
   departments_id: number[];
+  departments?: CustomPointDepartment[];
   points: number;
   action_id: number | null;
   action_name: string | null;

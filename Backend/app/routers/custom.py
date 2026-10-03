@@ -60,9 +60,16 @@ class CustomMemberPointsRequest(BaseClassModel):
     point_deatils: List[MemberPointDetails]
 
 
+class DepartmentRef(BaseClassModel):
+    id: int
+    name: str
+    ar_name: str
+
+
 class DepartmentPointDetailsWithLogId(BaseClassModel):
     log_id: int
     departments_id: list[int]
+    departments: List[DepartmentRef]
     points: int
     action_id: int | None = None
     action_name: str | None = None
@@ -213,6 +220,21 @@ def get_department_custom_points(event_id: int, session: DB):
                 "action_name": point_data["action_name"],
             }
         )
+
+    # [4] Resolve department names for everything a saved row references. The
+    # lookup is unfiltered, so a row that references a department archived or
+    # taken out of the leaderboard since it was saved still shows its name and
+    # stays visible/removable in the editor.
+    referenced_ids = {department_id for detail in point_details for department_id in detail["departments_id"]}
+    departments_by_id = {d.id: d for d in departments_queries.get_departments_by_ids(session, referenced_ids)}
+
+    for detail in point_details:
+        detail["departments"] = [
+            DepartmentRef(id=department_id, name=department.name, ar_name=department.ar_name)
+            if (department := departments_by_id.get(department_id))
+            else DepartmentRef(id=department_id, name="", ar_name="")
+            for department_id in detail["departments_id"]
+        ]
 
     logger.info(f"Found {len(point_details)} custom point entries for event {event_id}")
     response = CustomDepartmentPointsResponse(

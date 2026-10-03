@@ -125,12 +125,24 @@ export default function EditCustomEventPage() {
       }
 
       if (deptsRes.success) {
-        setDepartmentOptions(
-          deptsRes.data.map((d) => ({
-            id: d.id,
-            label: d.ar_name || d.name,
-          }))
-        );
+        const options = deptsRes.data.map((d) => ({
+          id: d.id,
+          label: d.ar_name || d.name,
+        }));
+
+        // Rows saved earlier can reference departments that GET /departments no
+        // longer lists (archived or unranked since then); GET /custom/departments
+        // carries their names so they stay visible and removable in the editor.
+        const knownIds = new Set(options.map((o) => o.id));
+        for (const detail of eventRes.success ? eventRes.data.point_details : []) {
+          for (const department of detail.departments ?? []) {
+            if (knownIds.has(department.id)) continue;
+            knownIds.add(department.id);
+            options.push({ id: department.id, label: department.ar_name || department.name });
+          }
+        }
+
+        setDepartmentOptions(options);
       }
 
       if (membersRes.success) {
