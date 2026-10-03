@@ -51,6 +51,17 @@ These are enforced by tests, not just preference:
 - **Logging** is stdlib `logging` with a module-scoped
   `logger = logging.getLogger(__name__)`. `print()`, `write_log` and `LogFile`
   are banned and the test suite fails if they reappear.
+- **Ids are UUIDs.** Every new table's id is a UUID:
+  `id: Mapped[str] = mapped_column(UUID_CHAR, primary_key=True, default=new_id)`.
+  `new_id` (`app/DB/ids.py`) makes time-ordered UUIDv7s, so ordering by id still
+  means creation order, as it did with integers. Every column pointing at it is
+  `UUID_CHAR` too (in a migration,
+  `mysql.CHAR(36, charset="ascii", collation="ascii_bin")`; foreign keys need
+  both sides to match). In the API and the frontend these ids are strings. Never
+  an auto-increment integer. The older tables that still have integer ids
+  (members, events, departments, logs and the rest) stay that way: too much
+  depends on them, including the leaderboard app. `tests/test_uuid_ids.py`
+  lists them and fails on any other table with an integer id.
 
 ## Action IDs are hardcoded
 
