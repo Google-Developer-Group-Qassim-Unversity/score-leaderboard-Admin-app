@@ -201,7 +201,13 @@ export function createApi(request: Requester) {
   };
 
   const departments = {
-    list: () => request.json<Department[]>("/departments", { revalidate: CACHE_TTL, tags: ["departments"] }),
+    // `ranked` is the event-picker view: non-leaderboard departments (the Board,
+    // club leadership) are real departments but cannot be filed events under.
+    list: (ranked = false) =>
+      request.json<Department[]>(ranked ? "/departments?ranked=true" : "/departments", {
+        revalidate: CACHE_TTL,
+        tags: ["departments"],
+      }),
   };
 
   const forms = {

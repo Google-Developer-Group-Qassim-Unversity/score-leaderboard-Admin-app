@@ -143,7 +143,7 @@ export function EventForm({
 
   // Fetch actions and departments
   const { data: actionsData, isLoading: isLoadingActions } = useActions();
-  const { data: departments, isLoading: isLoadingDepartments } = useDepartments();
+  const { data: departments, isLoading: isLoadingDepartments } = useDepartments(true);
 
   const departmentOptions = React.useMemo(
     () => departmentsWithOptions(departments, additionalDepartments),

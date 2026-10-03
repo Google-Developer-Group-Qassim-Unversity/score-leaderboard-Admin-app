@@ -13,7 +13,7 @@ export const eventKeys = {
   fullDetails: () => [...eventKeys.all, 'fullDetail'] as const,
   fullDetail: (id: number | string) => [...eventKeys.fullDetails(), id] as const,
   actions: () => [...eventKeys.all, 'actions'] as const,
-  departments: () => [...eventKeys.all, 'departments'] as const,
+  departments: (ranked = false) => [...eventKeys.all, 'departments', ranked] as const,
   attendance: (id: number | string, day: string, type?: string) => [...eventKeys.all, 'attendance', id, day, type] as const,
 };
 
@@ -131,11 +131,11 @@ export function useActions() {
   });
 }
 
-export function useDepartments() {
+export function useDepartments(ranked = false) {
   const api = useApi();
   return useQuery({
-    queryKey: eventKeys.departments(),
-    queryFn: () => api.departments.list(),
+    queryKey: eventKeys.departments(ranked),
+    queryFn: () => api.departments.list(ranked),
   });
 }
 

@@ -8,8 +8,8 @@ router = APIRouter(prefix="/departments", tags=["departments"])
 
 
 @router.get("", status_code=status.HTTP_200_OK, response_model=list[Department_model])
-def get_all_departments(session: DB):
-    departments = departments_queries.get_departments(session)
+def get_all_departments(session: DB, ranked: bool = False):
+    departments = departments_queries.get_departments(session, ranked=ranked)
     return departments
 
 

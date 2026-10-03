@@ -44,12 +44,25 @@ def test_inactive_departments_are_hidden(db_session, client: TestClient, seed_re
     assert seed_refs.dept_design.id not in ids
 
 
-def test_unranked_departments_are_hidden(db_session, client: TestClient, seed_refs):
-    """The Board and other show_in_leaderboard = 0 departments are not selectable here."""
+def test_unranked_departments_are_offered_by_default(db_session, client: TestClient, seed_refs):
+    """Club structure needs the Board (show_in_leaderboard = 0), so it stays in the shared list."""
     seed_refs.dept_design.show_in_leaderboard = 0
     db_session.commit()
 
     response = client.get("/departments")
+
+    assert_2xx(response)
+    ids = {d["id"] for d in response.json()}
+    assert seed_refs.dept_business.id in ids
+    assert seed_refs.dept_design.id in ids
+
+
+def test_unranked_departments_are_hidden_when_ranked(db_session, client: TestClient, seed_refs):
+    """The event picker asks for ranked departments; the Board is not selectable there."""
+    seed_refs.dept_design.show_in_leaderboard = 0
+    db_session.commit()
+
+    response = client.get("/departments", params={"ranked": "true"})
 
     assert_2xx(response)
     ids = {d["id"] for d in response.json()}

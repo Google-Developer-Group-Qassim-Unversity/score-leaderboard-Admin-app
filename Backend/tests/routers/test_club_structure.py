@@ -216,6 +216,8 @@ def test_overview_of_another_semester_is_separate(sign_in, club, db_session):
     assert body["total_members"] == 0
     assert club.design.id not in {d["id"] for d in body["departments"]}
     assert club.design.id in {d["id"] for d in body["available_departments"]}
+    # Leadership is not in the leaderboard, but club structure still offers it.
+    assert club.leadership.id in {d["id"] for d in body["available_departments"]}
 
 
 def test_overview_shows_the_name_a_department_had_that_semester(sign_in, club, db_session):
