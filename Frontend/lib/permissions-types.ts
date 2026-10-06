@@ -30,7 +30,7 @@ export interface SuperAdminEntry extends PersonRef {
 }
 
 export interface GrantEntry {
-  id: number;
+  id: string;
   member: PersonRef;
   permission: Perm;
   granted_by: PersonRef;
@@ -44,4 +44,36 @@ export interface DepartmentGrants {
   grantable: Perm[];
   members: PersonRef[];
   grants: GrantEntry[];
+}
+
+/** Why a member holds a permission in a department (see the backend's `explain_access`). */
+export type PermissionSource = "shared" | "department" | "team" | "grant";
+
+export interface HeldPermission {
+  permission: Perm;
+  sources: PermissionSource[];
+  granted_by: PersonRef | null;
+  granted_at: string | null;
+}
+
+export interface MemberDepartmentAccess {
+  department_id: number;
+  name: string;
+  ar_name: string;
+  /** `#rrggbb`, as on the club structure page. */
+  color: string;
+  /** A key of `DEPARTMENT_ICON_COMPONENTS`. */
+  icon: string;
+  roles: string[];
+  permissions: HeldPermission[];
+}
+
+export interface MemberAccess {
+  member: PersonRef;
+  is_super_admin: boolean;
+  is_staff: boolean;
+  semester: { id: string; name: string } | null;
+  basics: Perm[];
+  departments: MemberDepartmentAccess[];
+  permissions: Perm[];
 }

@@ -7,6 +7,7 @@ import type {
   CataloguePermission,
   DepartmentGrants,
   GrantEntry,
+  MemberAccess,
   SuperAdminEntry,
 } from "@/lib/permissions-types";
 import type {
@@ -201,7 +202,15 @@ export function createApi(request: Requester) {
   };
 
   const departments = {
-    list: () => request.json<Department[]>("/departments", { revalidate: CACHE_TTL, tags: ["departments"] }),
+    list: (params?: { endDate?: string }) =>
+      request.json<Department[]>("/departments", {
+        query: { end_date: params?.endDate || undefined },
+        revalidate: CACHE_TTL,
+        tags: ["departments"],
+      }),
+
+    get: (id: number) =>
+      request.json<Department>(`/departments/${id}`, { revalidate: CACHE_TTL, tags: ["departments"] }),
   };
 
   const forms = {
@@ -309,7 +318,7 @@ export function createApi(request: Requester) {
       request.json<{ count: number }>("/pipeline/calendar/bans", { method: "DELETE", body: { dates } }),
     notifications: (unread = false) =>
       request.json<PaginatedNotifications>("/pipeline/notifications", { query: { unread: unread || undefined } }),
-    readNotification: (id: number) =>
+    readNotification: (id: string) =>
       request.json<{ count: number }>(`/pipeline/notifications/${id}/read`, { method: "POST" }),
     readAllNotifications: () => request.json<{ count: number }>("/pipeline/notifications/read-all", { method: "POST" }),
   };
@@ -319,28 +328,28 @@ export function createApi(request: Requester) {
       request.json<PaginatedRequests>("/pipeline/requests", {
         query: { department_id: params.departmentId, stage: params.stage, page: params.page, page_size: params.pageSize },
       }),
-    get: (id: number) => request.json<EventRequestDetail>(`/pipeline/requests/${id}`),
+    get: (id: string) => request.json<EventRequestDetail>(`/pipeline/requests/${id}`),
     book: (departmentId: number, startDate: string, endDate: string) =>
       request.json<EventRequestDetail>("/pipeline/requests", {
         method: "POST", body: { department_id: departmentId, start_date: startDate, end_date: endDate },
       }),
-    redate: (id: number, startDate: string, endDate: string) =>
+    redate: (id: string, startDate: string, endDate: string) =>
       request.json<EventRequestDetail>(`/pipeline/requests/${id}/dates`, {
         method: "PUT", body: { start_date: startDate, end_date: endDate },
       }),
-    updateDetails: (id: number, body: UpdateDetailsInput) =>
+    updateDetails: (id: string, body: UpdateDetailsInput) =>
       request.json<EventRequestDetail>(`/pipeline/requests/${id}/details`, { method: "PUT", body }),
-    cancel: (id: number) => request.json<{ detail: string }>(`/pipeline/requests/${id}`, { method: "DELETE" }),
-    saveBrief: (id: number, team: PipelineTeam, brief: Record<string, unknown>) =>
+    cancel: (id: string) => request.json<{ detail: string }>(`/pipeline/requests/${id}`, { method: "DELETE" }),
+    saveBrief: (id: string, team: PipelineTeam, brief: Record<string, unknown>) =>
       request.json<EventRequestDetail>(`/pipeline/requests/${id}/briefs/${team}`, { method: "PUT", body: { brief } }),
-    submit: (id: number) => request.json<EventRequestDetail>(`/pipeline/requests/${id}/submit`, { method: "POST" }),
-    returnToTeam: (id: number, notes: string) =>
+    submit: (id: string) => request.json<EventRequestDetail>(`/pipeline/requests/${id}/submit`, { method: "POST" }),
+    returnToTeam: (id: string, notes: string) =>
       request.json<EventRequestDetail>(`/pipeline/requests/${id}/return`, { method: "POST", body: { notes } }),
-    resubmit: (id: number) => request.json<EventRequestDetail>(`/pipeline/requests/${id}/resubmit`, { method: "POST" }),
-    complete: (id: number, team: PipelineTeam) =>
+    resubmit: (id: string) => request.json<EventRequestDetail>(`/pipeline/requests/${id}/resubmit`, { method: "POST" }),
+    complete: (id: string, team: PipelineTeam) =>
       request.json<EventRequestDetail>(`/pipeline/requests/${id}/tasks/${team}/complete`, { method: "POST" }),
     inbox: () => request.json<InboxItem[]>("/pipeline/inbox"),
-    publish: (id: number, body: { department_action_id: number; member_action_id: number; image_url: string | null }) =>
+    publish: (id: string, body: { department_action_id: number; member_action_id: number; image_url: string | null }) =>
       request.json<EventRequestDetail>(`/pipeline/requests/${id}/publish`, { method: "POST", body }),
   };
 
@@ -360,6 +369,8 @@ export function createApi(request: Requester) {
     setDepartment: (departmentId: number, permissions: Perm[]) =>
       request.json<Assignments>(`/permissions/departments/${departmentId}`, { method: "PUT", body: { permissions } }),
     superAdmins: () => request.json<SuperAdminEntry[]>("/permissions/super-admins"),
+    /** What one member can do, and why. Super admins only. */
+    member: (memberId: number) => request.json<MemberAccess>(`/permissions/members/${memberId}`),
     addSuperAdmin: (memberId: number) =>
       request.json<SuperAdminEntry[]>("/permissions/super-admins", { method: "POST", body: { member_id: memberId } }),
     removeSuperAdmin: (memberId: number) =>
@@ -373,7 +384,7 @@ export function createApi(request: Requester) {
         method: "POST",
         body: { member_id: memberId, permission },
       }),
-    revoke: (departmentId: number, grantId: number) =>
+    revoke: (departmentId: number, grantId: string) =>
       request.json<{ detail: string }>(`/permissions/departments/${departmentId}/grants/${grantId}`, {
         method: "DELETE",
       }),

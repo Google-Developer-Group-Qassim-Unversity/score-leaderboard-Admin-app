@@ -269,8 +269,11 @@
   },
   "auth": {
     "logIn": "Log In",
-    "signUp": "Sign Up",
     "backToMainApp": "Back to Main App"
+  },
+  "signIn": {
+    "title": "Sign in to the admin console",
+    "subtitle": "For club staff. Use the account you use on the GDG Qassim app."
   },
   "home": {
     "clubStructure": {
@@ -316,7 +319,9 @@
     },
     "notStaff": {
       "title": "No access",
-      "description": "You don't have access to this app."
+      "description": "You don't have access to this app.",
+      "switchAccount": "Wrong account? Sign out and sign in with another one.",
+      "signOut": "Sign out"
     },
     "unavailable": {
       "title": "Couldn't check your access",
@@ -434,6 +439,9 @@
       "official": "Official Event",
       "department": "Department *",
       "departmentPlaceholder": "Select a department...",
+      "departmentArchived": "{name} (archived)",
+      "departmentSpecialized": "Specialized departments",
+      "departmentAdministrative": "Administrative departments",
       "departmentAction": "Department Action *",
       "departmentActionPlaceholder": "Select a department action...",
       "attendanceAccess": "Attendance Access"
@@ -1121,7 +1129,10 @@
     "date": "Date",
     "time": "Time",
     "eventType": "Event type",
-    "details": "Details"
+    "details": "Details",
+    "responsible": "Responsible",
+    "responsibleUnknown": "Not recorded",
+    "createdBy": "Created by {name}"
   },
   "eventLayout": {
     "backToPoints": "Back to Points",
@@ -1152,7 +1163,7 @@
     "subtitle": "Update the event details and configuration.",
     "deleteDraft": "Delete Draft",
     "deleteTitle": "Delete Event",
-    "deleteDescription": "This action cannot be undone. All associated data (forms, logs, submissions) will be permanently removed.",
+    "deleteDescription": "This action cannot be undone. All associated data (forms, logs, points, submissions) will be permanently removed. If it was published from the events pipeline, its request and any late penalty go too, and its booked days are free again.",
     "saveChanges": "Save Changes",
     "saving": "Saving...",
     "confirmDelete": "Are you sure you want to delete <strong>{name}</strong>?"
@@ -1874,9 +1885,8 @@
     "requests": {
       "mine": "Your department's requests",
       "none": "No requests yet. Book dates on the calendar to start one.",
-      "untitled": "Request #{id}",
+      "untitled": "Untitled request",
       "noDates": "No dates",
-      "pageTitle": "Event request #{id}",
       "tab": "Yours",
       "title": "Requests"
     },
@@ -2176,6 +2186,7 @@
     "tabs": {
       "grants": "Member grants",
       "leaders": "Leaders & VPs",
+      "member": "Member lookup",
       "superAdmins": "Super admins"
     },
     "grants": {
@@ -2222,6 +2233,60 @@
       "saved": "Saved",
       "failed": "Something went wrong"
     },
+    "member": {
+      "pick": "Pick a member",
+      "pickTitle": "Look up a member's permissions",
+      "change": "Change member",
+      "emptyTitle": "See what anyone can do",
+      "emptyHint": "Pick a member to see every permission they hold in the admin app, and where each one comes from.",
+      "loadFailed": "Couldn't load this member's permissions.",
+      "retry": "Try again",
+      "status": {
+        "superAdmin": "Super admin · can do everything",
+        "staff": "On the {semester} roster",
+        "regular": "Not on this semester's roster · no admin app access"
+      },
+      "rolesTitle": "Roles this semester",
+      "roles": {
+        "leader": "Leader",
+        "vp": "VP",
+        "member": "Member"
+      },
+      "listTitle": "Permissions",
+      "listHint": "Each permission shows the department it comes from, in that department's colour. Event and roster permissions only apply to those departments; the rest work club-wide.",
+      "showMissing": "Show the ones they don't have",
+      "nothing": "They don't hold any permissions.",
+      "notHeld": "Doesn't have this",
+      "why": {
+        "superAdmin": "Super admin",
+        "staff": "Everyone on staff",
+        "shared": "every leader & VP",
+        "department": "this department's leaders & VPs",
+        "team": "pipeline team",
+        "grant": "granted",
+        "grantBy": "granted by <bdi>{name}</bdi>, <bdi>{date}</bdi>"
+      },
+      "groups": {
+        "basics": "Basics",
+        "events": "Events and attendance",
+        "emails": "Emails and certificates",
+        "points": "Points",
+        "people": "People and structure",
+        "pipeline": "Events pipeline",
+        "system": "System"
+      },
+      "heldLabel": "Permissions held",
+      "heldValue": "{held} of {total}",
+      "groupCount": "{held} of {total}",
+      "legend": "What the icons mean",
+      "legendItems": {
+        "staff": "Everyone on staff",
+        "shared": "Every leader & VP",
+        "department": "The department's own",
+        "team": "Pipeline team",
+        "grant": "Granted to them"
+      }
+    },
     "superAdmins": {
       "title": "Super admins",
       "hint": "Super admins can do anything, to any department. They add and remove each other.",
@@ -2251,6 +2316,7 @@
     "updated": "Last updated",
     "notProvided": "Not provided",
     "memberPage": "View member page",
+    "permissions": "Permissions",
     "sendEmail": "Send email",
     "copy": "Copy {field}",
     "copied": "{field} copied"
