@@ -28,8 +28,9 @@ Sentry tag, so a Sentry issue links straight to its log lines.
 **Never push to `main`, and never open a PR into `main`.** Branch from `dev`,
 open the PR into `dev`. A merge to `dev` deploys staging
 (`admin-dev.gdg-q.com`, against `scores_staging`, a copy of prod); `main` only
-ever receives `dev` (a `dev` -> `main` PR, merged with a merge commit), and a
-push to `main` deploys prod. PR checks run on PRs into `dev` only.
+ever receives `dev`: once in a while, one large `dev` -> `main` PR, merged with
+a merge commit, which deploys prod. Don't open that PR unless asked - its
+timing is the team's call. PR checks run on PRs into `dev` only.
 
 Staging and local dev redirect every email away from real members. See
 [Backend/docs/STAGING.md](Backend/docs/STAGING.md).
