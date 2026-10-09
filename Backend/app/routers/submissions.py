@@ -8,7 +8,11 @@ from app.DB import submissions as submission_queries
 from app.DB import form_sync_jobs as job_queries
 from fastapi_clerk_auth import HTTPAuthorizationCredentials
 from app.helpers import authenticated_guard, CurrentMember, resolve_member
-from app.exceptions import NotFound
+from sqlalchemy import select
+
+from app.DB.schema import EventHistoryAction, EventsStatus, Forms
+from app.services import event_history
+from app.exceptions import NotFound, RegistrationClosed, SubmissionNotFound
 from app.routers.models import submission_exists_model, submission_accept_model
 from app.services.form_responses import FormResponsesClient
 from app.services.form_sync import resolve_form_access, sync_form_submissions
@@ -64,23 +68,56 @@ def check_submission_exists(form_id: int, member: CurrentMember, session: DB):
         raise
 
 
+@router.delete("/{form_id:int}", status_code=status.HTTP_200_OK, response_model=StatusResponse)
+def cancel_submission(form_id: int, member: CurrentMember, session: DB):
+    """Cancel the caller's own registration, while the event is still taking registrations.
+
+    Accepted registrations can be cancelled too - that frees the seat. Once the
+    event leaves `open` (it is running or over) the registration is part of the
+    record and stays.
+
+    A soft delete: the row is kept with `cancelled_at` set. Registering again
+    brings it back (see `create_submission`).
+    """
+    submission = submission_queries.get_submission_by_form_and_member(session, form_id, member.id)
+    if submission is None:
+        raise SubmissionNotFound(form_id)
+    if submission.form.event.status != EventsStatus.OPEN:
+        raise RegistrationClosed(form_id)
+    submission_queries.cancel_submission(session, submission)
+    session.commit()
+    logger.info(f"member [{member.id}] cancelled submission [{submission.id}] for form [{form_id}]")
+    return {"status": "success"}
+
+
 @router.put(
     "/accept",
     status_code=status.HTTP_200_OK,
     dependencies=[Depends(Require(Perm.SUBMISSIONS_REVIEW))],
     response_model=StatusResponse,
 )
-def accept_submission(submissions: list[submission_accept_model], session: DB, access: CurrentAccess):
+def accept_submission(
+    submissions: list[submission_accept_model], session: DB, access: CurrentAccess, actor: CurrentMember
+):
     # Every submission's event must belong to a department the caller reviews registrations for.
     for form_id in submission_queries.get_form_ids(session, [s.submission_id for s in submissions]):
         access.require_any(Perm.SUBMISSIONS_REVIEW, form_departments(session, {"form_id": form_id}))
     try:
+        # Who accepted or rejected whom, one history row per event.
+        reviewed: dict[int, list[dict]] = {}
         for submission in submissions:
-            submission = submission_queries.update_is_accepted(
-                session, submission.submission_id, submission.is_accepted
-            )
-            if submission is None:
+            row = submission_queries.update_is_accepted(session, submission.submission_id, submission.is_accepted)
+            if row is None:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Submission not found")
+            event_id = session.scalar(select(Forms.event_id).where(Forms.id == row.form_id))
+            assert event_id is not None, f"Form [{row.form_id}] has no event"
+            reviewed.setdefault(event_id, []).append(
+                {"submission_id": row.id, "member_id": row.member_id, "is_accepted": bool(row.is_accepted)}
+            )
+        for event_id, rows in reviewed.items():
+            event_history.record(
+                session, event_id, EventHistoryAction.SUBMISSIONS_REVIEWED, actor, {"submissions": rows}
+            )
         session.commit()
         return {"status": "success"}
     except Exception:

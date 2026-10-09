@@ -1,9 +1,12 @@
 name: Deploy
 
-# On merge to main, deploys only the half that changed. Run it by hand to redeploy both.
+# A push to dev deploys only the half that changed to staging
+# (admin-dev.gdg-q.com, Backend/docs/STAGING.md); a push to main, which only ever
+# receives dev, does the same to production. Run it by hand on either branch to
+# redeploy both halves.
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 permissions:
@@ -13,6 +16,19 @@ permissions:
 concurrency:
   group: deploy
   cancel-in-progress: false
+
+# Everything that differs between the two deployments. Nothing below may name
+# prod or staging directly. Staging runs one worker: it serves a handful of
+# developers, and the VPS also carries prod.
+env:
+  BRANCH: ${{ github.ref_name }}
+  INFISICAL_ENV: ${{ github.ref_name == 'dev' && 'staging' || 'prod' }}
+  BACKEND_NAME: ${{ github.ref_name == 'dev' && 'GDG-backend-staging' || 'GDG-backend' }}
+  BACKEND_PORT: ${{ github.ref_name == 'dev' && '7502' || '7501' }}
+  BACKEND_WORKERS: ${{ github.ref_name == 'dev' && '1' || '4' }}
+  FRONTEND_DIR: ${{ github.ref_name == 'dev' && 'GDG-admin-frontend-staging' || 'GDG-admin-frontend' }}
+  FRONTEND_CONTAINER: ${{ github.ref_name == 'dev' && 'gdg-admin-web-staging' || 'gdg-admin-web' }}
+  FRONTEND_PORT: ${{ github.ref_name == 'dev' && '3013' || '3012' }}
 
 jobs:
   changes:
@@ -26,6 +42,11 @@ jobs:
         id: filter
         if: github.event_name == 'push'
         with:
+          # Compare with this branch's previous commit. Without it, a push to
+          # any branch but the default (dev) is compared with dev, and a push
+          # to main - which only ever receives dev - looks unchanged: both
+          # halves were skipped on the first promotion (run 37878274507).
+          base: ${{ github.ref_name }}
           filters: |
             backend: ["Backend/**", ".github/workflows/deploy.yml"]
             frontend: ["Frontend/**", ".github/workflows/deploy.yml"]
@@ -40,12 +61,13 @@ jobs:
           host: ${{ secrets.INFISICAL_VPS_HOST }}
           username: ${{ secrets.INFISICAL_VPS_USER }}
           key: ${{ secrets.INFISICAL_GITHUB_SSH_PRIVATE_KEY }}
+          envs: BRANCH,INFISICAL_ENV,BACKEND_NAME,BACKEND_PORT,BACKEND_WORKERS
           script: |
             set -e
             export PATH="$HOME/.local/bin:/home/ubuntu/.nvm/versions/node/v24.12.0/bin:$PATH"
-            NAME=GDG-backend
+            NAME=$BACKEND_NAME
             DIR=~/$NAME
-            PROD="infisical run --env=prod --path=/admin-backend --projectId=300b1e97-7e52-4a4e-872d-053b9082cac5 --silent --"
+            SECRETS="infisical run --env=$INFISICAL_ENV --path=/admin-backend --projectId=300b1e97-7e52-4a4e-872d-053b9082cac5 --silent --"
 
             source /etc/infisical/prod.env
             INFISICAL_TOKEN=$(infisical login --method="$INFISICAL_AUTH_METHOD" \
@@ -57,16 +79,16 @@ jobs:
             #    app is untouched, so any failure here leaves it serving.
             rm -rf "$DIR.new"
             TMP=$(mktemp -d)
-            git clone --depth 1 https://github.com/${{ github.repository }}.git "$TMP"
+            git clone --depth 1 --branch "$BRANCH" https://github.com/${{ github.repository }}.git "$TMP"
             mv "$TMP/Backend" "$DIR.new"
             rm -rf "$TMP"
             cd "$DIR.new"
             uv sync --locked
 
-            # 2. Migrate production to this release's head, then confirm it got there.
-            echo "Production is at: $($PROD uv run alembic current 2>/dev/null)"
-            $PROD uv run alembic upgrade head
-            $PROD uv run alembic current --check-heads
+            # 2. Migrate this deployment's database to the release's head, then confirm it got there.
+            echo "$INFISICAL_ENV is at: $($SECRETS uv run alembic current 2>/dev/null)"
+            $SECRETS uv run alembic upgrade head
+            $SECRETS uv run alembic current --check-heads
 
             # 3. Replace the live release and restart. The venv is rebuilt because
             #    its scripts hardcode the directory path.
@@ -76,12 +98,12 @@ jobs:
             rm -rf .venv
             uv sync --locked
             pm2 delete $NAME || true
-            pm2 start "INFISICAL_TOKEN=$INFISICAL_TOKEN $PROD uv run uvicorn app.main:app --port 7501 --host 0.0.0.0 --workers 4" --name $NAME --time
+            pm2 start "INFISICAL_TOKEN=$INFISICAL_TOKEN $SECRETS uv run uvicorn app.main:app --port $BACKEND_PORT --host 0.0.0.0 --workers $BACKEND_WORKERS" --name $NAME --time
             pm2 save
 
             # 4. Smoke test: the app is up, reaches the DB, and a real ORM query works.
             for i in $(seq 30); do
-              if curl -fsS -o /dev/null localhost:7501/health/db && curl -fsS -o /dev/null localhost:7501/events/; then
+              if curl -fsS -o /dev/null localhost:$BACKEND_PORT/health/db && curl -fsS -o /dev/null localhost:$BACKEND_PORT/events/; then
                 echo "Backend is serving ✅"; exit 0
               fi
               sleep 2
@@ -100,12 +122,13 @@ jobs:
           host: ${{ secrets.INFISICAL_VPS_HOST }}
           username: ${{ secrets.INFISICAL_VPS_USER }}
           key: ${{ secrets.INFISICAL_GITHUB_SSH_PRIVATE_KEY }}
+          envs: BRANCH,INFISICAL_ENV,FRONTEND_DIR,FRONTEND_CONTAINER,FRONTEND_PORT
           script: |
             set -e
-            DIR=~/GDG-admin-frontend
+            DIR=~/$FRONTEND_DIR
 
             TMP=$(mktemp -d)
-            git clone --depth 1 https://github.com/${{ github.repository }}.git "$TMP"
+            git clone --depth 1 --branch "$BRANCH" https://github.com/${{ github.repository }}.git "$TMP"
             rm -rf "$DIR"
             mv "$TMP/Frontend" "$DIR"
             rm -rf "$TMP"
@@ -116,8 +139,10 @@ jobs:
               --client-id="$INFISICAL_UNIVERSAL_AUTH_CLIENT_ID" \
               --client-secret="$INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET" --plain --silent)
             export INFISICAL_TOKEN
-            infisical export --env=prod --path=/admin-frontend --projectId=300b1e97-7e52-4a4e-872d-053b9082cac5 \
+            infisical export --env=$INFISICAL_ENV --path=/admin-frontend --projectId=300b1e97-7e52-4a4e-872d-053b9082cac5 \
               --format=dotenv --output-file=.env.production
 
-            docker compose -f docker-compose.production.yml --env-file .env.production up -d --build
+            # The compose project is named after $DIR, so prod and staging never replace each other.
+            CONTAINER_NAME=$FRONTEND_CONTAINER HOST_PORT=$FRONTEND_PORT \
+              docker compose -f docker-compose.production.yml --env-file .env.production up -d --build
             docker image prune -f

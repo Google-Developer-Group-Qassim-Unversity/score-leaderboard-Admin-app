@@ -1,7 +1,6 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 
-from app.DB import event_pipeline as pipeline_queries
 from app.DB import (
     events as events_queries,
     forms as form_queries,
@@ -10,6 +9,9 @@ from app.DB import (
 )
 
 from app.routers.models import (
+    EventHistoryItem,
+    EventPerson_model,
+    EventHistoryResponse,
     PaginatedEvents_model,
     Events_model,
     ConflictResponse,
@@ -34,10 +36,12 @@ from app.services.google_client import set_form_publish_state
 from app.semesters import resolve_semester
 from time import perf_counter
 from typing import Annotated, Literal
-from app.exceptions import DataIntegrityError, PipelineConflict
+from app.exceptions import DataIntegrityError
 from app.dependencies import DB
 from sqlalchemy.orm import Session
-from app.DB.schema import EventsLocationType, EventsStatus, FormType
+from app.DB import event_pipeline as pipeline_queries
+from app.DB.schema import EventHistoryAction, EventsLocationType, EventsStatus, FormType, Members, PipelineHistoryAction
+from app.services import event_history, pipeline_history
 
 from app.routers.responses import DetailResponse
 from app.services.permissions.catalogue import Perm
@@ -138,6 +142,29 @@ def get_my_events(member: CurrentMember, session: DB):
 
 
 @router.get(
+    "/{event_id:int}/history",
+    status_code=status.HTTP_200_OK,
+    response_model=EventHistoryResponse,
+    dependencies=[Depends(Require(Perm.EVENTS_VIEW))],
+)
+def get_event_history(event_id: int, session: DB):
+    """Who did what to the event from /events, and when, oldest first. It outlives a deleted event."""
+    request = pipeline_queries.get_request_for_event(session, event_id)
+    return EventHistoryResponse(
+        items=[
+            EventHistoryItem(
+                action=row.action,
+                at=row.at,
+                actor=EventPerson_model(member_id=row.actor.id, name=row.actor.name) if row.actor else None,
+                details=row.details,
+            )
+            for row in event_history.for_event(session, event_id)
+        ],
+        pipeline_request_id=request.id if request else None,
+    )
+
+
+@router.get(
     "/{event_id:int}/details",
     status_code=status.HTTP_200_OK,
     response_model=EventDetailsModel,
@@ -149,7 +176,16 @@ def get_event_details(event_id: int, session: DB):
     actions = events_queries.get_actions_by_event_id(session, event_id)
     if not event or not actions:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
-    return {"event": event, "actions": actions}
+    return {
+        "event": event,
+        "actions": actions,
+        "responsible": _person(event.responsible_member),
+        "created_by": _person(event.creator),
+    }
+
+
+def _person(member: Members | None) -> dict | None:
+    return {"member_id": member.id, "name": member.name} if member else None
 
 
 @router.post(
@@ -159,11 +195,22 @@ def get_event_details(event_id: int, session: DB):
     responses={409: {"model": ConflictResponse, "description": "Event already exists"}},
     dependencies=[Depends(Require(Perm.EVENTS_CREATE))],
 )
-def create_event(event_data: createEvent_model, session: DB, access: CurrentAccess):
+def create_event(event_data: createEvent_model, session: DB, member: CurrentMember, access: CurrentAccess):
     access.require(Perm.EVENTS_CREATE, event_data.department_id)
     try:
-        logger.info("Creating New Event and Associated Form")
-        new_event, _ = create_full_event(session, event_data)
+        logger.info("Member [%s] creating New Event and Associated Form", member.id)
+        new_event, _ = create_full_event(session, event_data, responsible_member_id=member.id, created_by=member.id)
+        event_history.record(
+            session,
+            new_event,
+            EventHistoryAction.CREATED,
+            member,
+            {
+                "department_id": event_data.department_id,
+                "department_action_id": event_data.department_action_id,
+                "member_action_id": event_data.member_action_id,
+            },
+        )
         session.commit()
         session.refresh(new_event)
 
@@ -190,9 +237,12 @@ def create_event(event_data: createEvent_model, session: DB, access: CurrentAcce
     },
     dependencies=[Depends(Require(Perm.EVENTS_EDIT, event_departments))],
 )
-def update_event(event_id: int, event_data: UpdateEventModel, session: DB):
+def update_event(event_id: int, event_data: UpdateEventModel, session: DB, member: CurrentMember):
     try:
         logger.info(f"Updating Event [{event_id}]")
+        existing = events_queries.get_event_by_id(session, event_id)
+        before = event_history.snapshot(existing) if existing else {}
+        points_before: dict = {}
 
         # 1. Validate event exists and update event fields
         if event_data.event.end_datetime < event_data.event.start_datetime:
@@ -232,6 +282,12 @@ def update_event(event_id: int, event_data: UpdateEventModel, session: DB):
             if not department_log or not member_log:
                 logger.error(f"HTTP 500: Could not identify department and member logs for event [{event_id}]")
                 raise DataIntegrityError("Could not identify logs")
+
+            points_before = {
+                "department_action_id": department_log.action_id,
+                "member_action_id": member_log.action_id,
+                "department_id": log_queries.get_department_id_from_log(session, department_log.id),
+            }
 
             # 4. Actions list: first = department action, second = member action
             department_action = event_data.actions[0]
@@ -297,6 +353,16 @@ def update_event(event_id: int, event_data: UpdateEventModel, session: DB):
                     )
                     log_queries.delete_n_department_logs(session, department_log.id, days_to_remove)
 
+        changed = event_history.changes(before, event_history.snapshot(updated_event))
+        if points_before:
+            points_after = {
+                "department_action_id": event_data.actions[0].action_id,
+                "member_action_id": event_data.actions[1].action_id,
+                "department_id": event_data.actions[0].department_id or points_before["department_id"],
+            }
+            changed |= event_history.changes(points_before, points_after)
+        if changed:
+            event_history.record(session, updated_event, EventHistoryAction.EDITED, member, changed)
         session.commit()
         session.refresh(updated_event)
         logger.info(f"Event [{event_id}] updated successfully")
@@ -316,7 +382,7 @@ def update_event(event_id: int, event_data: UpdateEventModel, session: DB):
     dependencies=[Depends(Require(Perm.EVENTS_DELETE, event_departments))],
     response_model=DetailResponse,
 )
-def delete_event(event_id: int, session: DB):
+def delete_event(event_id: int, session: DB, member: CurrentMember):
     logger.info(f"Deleting Event [{event_id}]")
 
     event = events_queries.get_event_by_id(session, event_id)
@@ -328,15 +394,19 @@ def delete_event(event_id: int, session: DB):
         logger.error(f"HTTP 400: Cannot delete event [{event_id}] with status [{event.status}]")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only draft events can be deleted")
 
-    # Deleting it would leave the request published with its days taken, and drop
-    # any late penalty with the event's logs (pipeline bug #6).
-    request = pipeline_queries.get_request_by_event_id(session, event_id)
+    # A pipeline request that published it goes too, through the foreign key:
+    # its tasks, penalty and points, and its days are free again. Its history
+    # stays, with this as the last entry.
+    request = pipeline_queries.get_request_for_event(session, event_id)
     if request is not None:
-        raise PipelineConflict(
-            "published_by_pipeline",
-            f"This event was published from the events pipeline (request {request.id}), so it can't be deleted",
+        pipeline_history.record(
+            session,
+            PipelineHistoryAction.EVENT_DELETED,
+            member,
+            request,
+            {"event_id": event_id, "event_name": event.name},
         )
-
+    event_history.record(session, event, EventHistoryAction.DELETED, member)
     event_name = event.name
     events_queries.delete_event(session, event_id)
     session.commit()
@@ -351,7 +421,7 @@ def delete_event(event_id: int, session: DB):
     responses={404: {"model": NotFoundResponse, "description": "Event not found"}},
     dependencies=[Depends(Require(Perm.EVENTS_EDIT, event_departments))],
 )
-def update_event_status(event_id: int, status_data: UpdateEventStatus_model, session: DB):
+def update_event_status(event_id: int, status_data: UpdateEventStatus_model, session: DB, member: CurrentMember):
     event = events_queries.get_event_by_id(session, event_id)
     if not event:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
@@ -379,6 +449,14 @@ def update_event_status(event_id: int, status_data: UpdateEventStatus_model, ses
                 )
 
     event.status = EventsStatus(status_data.status)
+    if event.status != old_status:
+        event_history.record(
+            session,
+            event,
+            EventHistoryAction.STATUS_CHANGED,
+            member,
+            {"status": [old_status.value, event.status.value]},
+        )
     session.commit()
     session.refresh(event)
 
@@ -400,14 +478,28 @@ def update_event_status(event_id: int, status_data: UpdateEventStatus_model, ses
     responses={404: {"model": NotFoundResponse, "description": "Event not found"}},
     dependencies=[Depends(Require(Perm.EVENTS_EDIT, event_departments))],
 )
-def update_event_meeting_url(event_id: int, meeting_url_data: UpdateEventMeetingUrl_model, session: DB):
+def update_event_meeting_url(
+    event_id: int, meeting_url_data: UpdateEventMeetingUrl_model, session: DB, member: CurrentMember
+):
     """Set or clear the join link shown to members on a remote event."""
     existing_event = events_queries.get_event_by_id(session, event_id)
+    if existing_event is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     if meeting_url_data.meeting_url and existing_event.location_type != EventsLocationType.ONLINE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="meeting_url can only be set on an online event"
         )
-    event = events_queries.update_event_meeting_url(session, event_id, meeting_url_data.meeting_url)
+    old_url = existing_event.meeting_url
+    events_queries.update_event_meeting_url(session, event_id, meeting_url_data.meeting_url)
+    event = existing_event
+    if old_url != event.meeting_url:
+        event_history.record(
+            session,
+            event,
+            EventHistoryAction.MEETING_URL_CHANGED,
+            member,
+            {"meeting_url": [old_url, event.meeting_url]},
+        )
     session.commit()
     session.refresh(event)
     logger.info(f"Event [{event_id}] meeting url {'set' if meeting_url_data.meeting_url else 'cleared'}")

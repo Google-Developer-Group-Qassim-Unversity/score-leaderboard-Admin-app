@@ -1,8 +1,11 @@
 name: PR Checks
 
+# Every change reaches main through dev (CLAUDE.md), so the checks run on PRs
+# into dev. A dev -> main PR carries only what already passed here.
+
 on:
   pull_request:
-    branches: [main]
+    branches: [dev]
 
 permissions:
   contents: read

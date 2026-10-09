@@ -4,8 +4,10 @@ from pydantic import BaseModel, HttpUrl, EmailStr, field_validator, conlist, Con
 from typing import List, Literal, Dict
 from datetime import datetime
 from pydantic.types import JsonValue
+from app.member_names import validate_member_name
 from app.config import config
-from app.DB.schema import EventsLocationType, MembersGender, FormType
+from app.DB.schema import EventHistoryAction, EventsLocationType, MembersGender, FormType
+from app.routers.club_structure_models import UtcDateTime
 
 # A bare Google Meet code, e.g. "abc-defg-hij" - no scheme, no domain.
 _MEET_CODE_RE = re.compile(r"^[a-zA-Z]{2,5}-[a-zA-Z]{2,5}-[a-zA-Z]{2,5}$")
@@ -91,9 +93,33 @@ class event_actions_model(BaseClassModel):
     department_ar_name: str | None = None
 
 
+class EventPerson_model(BaseClassModel):
+    member_id: int
+    name: str
+
+
 class EventDetailsModel(BaseClassModel):
     event: Events_model
     actions: conlist(event_actions_model, min_length=1)  # pyright: ignore[reportInvalidTypeForm]
+    # Null on events created before these were recorded, or if the member was deleted.
+    responsible: EventPerson_model | None = None
+    created_by: EventPerson_model | None = None
+
+
+class EventHistoryItem(BaseClassModel):
+    """One thing an admin did to the event (app/services/event_history.py)."""
+
+    action: EventHistoryAction
+    at: UtcDateTime
+    actor: EventPerson_model | None
+    details: dict | None
+
+
+class EventHistoryResponse(BaseClassModel):
+    # Oldest first.
+    items: list[EventHistoryItem]
+    # The pipeline request that published the event, whose history has the steps before.
+    pipeline_request_id: str | None
 
 
 class UpdateEventModel(BaseClassModel):
@@ -162,6 +188,7 @@ def _validate_optional_uni_id(value: str | None) -> str | None:
 class Member_model(BaseClassModel):
     id: int | None = None
     name: str
+    public_name: str | None = None
     email: EmailStr
     phone_number: str | None
     uni_id: str | None = None
@@ -414,6 +441,13 @@ class customeDepartmentsPoints_model(BaseClassModel):
 
 class MemberUpdateModel(BaseModel):
     name: str | None = None
+    public_name: str | None = None
+
+    @field_validator("name", "public_name", mode="before")
+    @classmethod
+    def validate_names(cls, value, info):
+        return validate_member_name(value, max_length=50 if info.field_name == "name" else 150)
+
     email: EmailStr | None = None
     phone_number: str | None = None
     gender: Literal["Male", "Female"] | None = None
