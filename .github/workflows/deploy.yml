@@ -42,6 +42,11 @@ jobs:
         id: filter
         if: github.event_name == 'push'
         with:
+          # Compare with this branch's previous commit. Without it, a push to
+          # any branch but the default (dev) is compared with dev, and a push
+          # to main - which only ever receives dev - looks unchanged: both
+          # halves were skipped on the first promotion (run 37878274507).
+          base: ${{ github.ref_name }}
           filters: |
             backend: ["Backend/**", ".github/workflows/deploy.yml"]
             frontend: ["Frontend/**", ".github/workflows/deploy.yml"]
