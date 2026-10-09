@@ -23,11 +23,16 @@ handles the fact that `pm2` is not on the default non-interactive PATH.
 Every response carries that id in the `X-Request-ID` header, and it is set as a
 Sentry tag, so a Sentry issue links straight to its log lines.
 
-## Staging
+## Branches: everything goes through `dev`
 
-`dev` deploys to `admin-dev.gdg-q.com` against `scores_staging`, a copy of
-prod; `main` still deploys prod. Staging and local dev redirect every email
-away from real members. See [Backend/docs/STAGING.md](Backend/docs/STAGING.md).
+**Never push to `main`, and never open a PR into `main`.** Branch from `dev`,
+open the PR into `dev`. A merge to `dev` deploys staging
+(`admin-dev.gdg-q.com`, against `scores_staging`, a copy of prod); `main` only
+ever receives `dev` (a `dev` -> `main` PR, merged with a merge commit), and a
+push to `main` deploys prod. PR checks run on PRs into `dev` only.
+
+Staging and local dev redirect every email away from real members. See
+[Backend/docs/STAGING.md](Backend/docs/STAGING.md).
 
 ## Backend conventions
 
