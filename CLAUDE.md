@@ -23,6 +23,12 @@ handles the fact that `pm2` is not on the default non-interactive PATH.
 Every response carries that id in the `X-Request-ID` header, and it is set as a
 Sentry tag, so a Sentry issue links straight to its log lines.
 
+## Staging
+
+`dev` deploys to `admin-dev.gdg-q.com` against `scores_staging`, a copy of
+prod; `main` still deploys prod. Staging and local dev redirect every email
+away from real members. See [Backend/docs/STAGING.md](Backend/docs/STAGING.md).
+
 ## Backend conventions
 
 These are enforced by tests, not just preference:
