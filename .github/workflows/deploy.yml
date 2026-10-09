@@ -1,8 +1,9 @@
 name: Deploy
 
-# On merge to main, deploys only the half that changed to production; a push to
-# dev does the same to staging (admin-dev.gdg-q.com, docs/STAGING.md). Run it by
-# hand on either branch to redeploy both halves.
+# A push to dev deploys only the half that changed to staging
+# (admin-dev.gdg-q.com, Backend/docs/STAGING.md); a push to main, which only ever
+# receives dev, does the same to production. Run it by hand on either branch to
+# redeploy both halves.
 on:
   push:
     branches: [main, dev]
