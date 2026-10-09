@@ -73,6 +73,35 @@ patch the lookup out. Read
 [Backend/docs/HARDCODED_ACTION_IDS.md](Backend/docs/HARDCODED_ACTION_IDS.md)
 before changing anything in that area; it has the fix plan and a checklist.
 
+## Frontend: the design system is "Mud & Doors"
+
+Any UI work - a new page, a new component, a tweak - follows
+[Frontend/DESIGN.md](Frontend/DESIGN.md) and is done with the **`impeccable`**
+skill, which loads `Frontend/PRODUCT.md` and `Frontend/DESIGN.md` itself. The
+design is settled: every UI task is a refinement inside it, so never run
+impeccable's redesign / new-visual-world flow and never edit DESIGN.md or
+PRODUCT.md unless asked for a design-system change. Do not invent a look;
+extend this one:
+
+- Colour is state, never decoration: green done, ochre waiting on someone,
+  madder returned/overdue, indigo with a team/open, umber draft. Everything else
+  is the limewash wall and mud ink, through the tokens in `app/globals.css`.
+- Build from `components/najdi.tsx` (Door, Plate, Tarma, Courses, Mark, Count,
+  SectionHead, Mortar, Shurfa) and the restyled `components/ui/*`; status
+  colours come from `components/status-badge.tsx`, never per page.
+- Phone first, Arabic first: ≥44px targets, rows not card grids, logical CSS,
+  `<bdi>` on user content, dates through `useFormatters()` in `lib/format.ts`
+  (Western digits, Gregorian calendar).
+- Reem Kufi only for titles; Thmanyah Sans for everything else. Its licence
+  forbids re-hosting it, so it is never committed: `pnpm fonts` fetches it.
+- Check UI changes on phone and desktop, Arabic and English, light and dark,
+  with `node tests/ui-preview/shoot.mjs` (see `tests/ui-preview/README.md`).
+- Code written in the old four-colour look (brand-* classes, BrandRail,
+  StatTile, round dots, card grids) is migrated, not patched: DESIGN.md §9 maps
+  every old piece to its replacement and lists the exports that no longer exist
+  (old `brand-*` classes compile to nothing, silently). Finish every UI change
+  with DESIGN.md §10, the definition of done.
+
 ## Frontend: the API layer is mid-migration
 
 `Frontend/lib/api/` is the API as one module - `useApi()` in a client

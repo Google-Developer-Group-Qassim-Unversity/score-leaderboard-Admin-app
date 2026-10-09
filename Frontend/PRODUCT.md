@@ -72,9 +72,13 @@ with a penalty clock) rather than a generic event tool.
 
 - The GDG logo (`Frontend/public/gdg.png`, the four-colour chevrons) is the
   app's main logo.
-- Beyond the logo the palette is open; Google's four colours may still carry
-  status, but they are not required to lead the identity.
+- The visual identity is **Mud & Doors** (chosen 2026-10-09 from four
+  directions): limewash walls, colour only on painted Najdi doors, each door
+  colour a state. It is recorded in `Frontend/DESIGN.md` and is settled; new
+  work extends it rather than proposing another look.
 - Comfortable over loud: the user asked for "good, perfect, comfortable colors".
+- Fonts: Thmanyah Sans for the interface (requested by the user), Reem Kufi for
+  titles.
 
 ## Evidence on Hand
 
@@ -89,6 +93,6 @@ with a penalty clock) rather than a generic event tool.
    screen's job, not a side page.
 2. Phone first for the three phone jobs; desktop gets more room, not a
    different product.
-3. Colour carries meaning (state, team, department), never decoration alone.
+3. Colour carries state, never decoration (the five door tones in DESIGN.md).
 4. Always say whose turn it is and what happens next.
 5. Arabic first; every layout mirrors.
